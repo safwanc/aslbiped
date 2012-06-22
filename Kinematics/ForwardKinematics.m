@@ -1,34 +1,17 @@
-function [ TW, T0, Z0, J0 ] = ForwardKinematics( X )
+function BIPED   = ForwardKinematics( X )
 %#codegen
     
-	TW = reshape(X(1:16), 4, 4);  
-    Q = X(17:end);
+	TW0 = reshape(X(1:16), 4, 4);  
 
     persistent T0L T0R
     if isempty(T0L) T0L = [eye(3) [0 -0.13 -0.011525]'; 0 0 0 1]; end
     if isempty(T0R) T0R = [eye(3) [0  0.13 -0.011525]'; 0 0 0 1]; end
     
-    TL = FKleg(T0L, Q); % 4x4x7 array of transforms
-
-    T0 = TL; 
-    Z0 = Zleg(TL); 
-    J0 = Jleg(TL); 
+    TL = FKleg(T0L, X(17:23)); 
+    TR = FKleg(T0R, X(24:30)); 
     
-end
+    BIPED = struct('TW', TW0, 'TL', TL, 'TR', TR); 
 
-function [ Z ] = Zleg(T)
-    Z = zeros(3,7); 
-    Z(:,1) = T(1:3, 3, 1); 
-	Z(:,2) = T(1:3, 1, 2); 
-	Z(:,3) = T(1:3, 2, 3); 
-	Z(:,4) = T(1:3, 2, 4); 
-	Z(:,5) = T(1:3, 3, 5); 
-	Z(:,6) = T(1:3, 2, 6); 
-	Z(:,7) = T(1:3, 1, 7); 
-end
-
-function [ J ] = Jleg(T)
-    J = squeeze(T(1:3,4,:)); 
 end
 
 function [ T ] = FKleg( T0, Q )
