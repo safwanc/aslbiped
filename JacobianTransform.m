@@ -1,24 +1,72 @@
-function DQ = JacobianTransform(TW0, T0N, DX, n)
+function DQ = JacobianTransform(BIPED, DX)
 %#codegen
 
     persistent S
-    if isempty(S) S = [eye(7) zeros(7, 6)]; end
- 
-    P0 = [0 0.13 -0.011525]'; 
-    F0 = Transform(T0N(:,:,7), [0 0 -0.06480]'); 
+    if isempty(S) S = [eye(14) zeros(14, 6)]; end
     
-    Jp = JLi(TW0, T0N, P0); 
-    Jc = JLi(TW0, T0N, F0); 
-
-    if (rank(Jc(:,8:13)) ~= 6)
-        error('Constraint Jacobian lost full rank'); 
-    end
+    Ju = [...
+            Jleg(0, BIPED.L); ...
+            Jleg(1, BIPED.R); ...
+        ];
     
-    Rb = TW0(1:3,1:3); 
-    Ju = [Jc; Jp(1:3,:)]; 
-    DQ = S * Inverse(Ju) * [zeros(6,1); Rb*DX]; 
+    DQ = S * Inverse(Ju) * DX;
 
 end
+
+
+
+% ------------------------------------------------------------------------
+% END-EFFECTOR JACOBIANS
+% ------------------------------------------------------------------------
+
+function [ J ] = Jleg(SIDE, LEG)
+    J = zeros(6,20); 
+    
+    Z = LEG.Z; 
+    O = LEG.O; 
+    EE = LEG.XF; 
+    
+    switch(SIDE)
+        case 0 
+            % Left Leg
+            J(:,1:7) = JLi(Z, O, EE); 
+        case 1 
+            % Right Leg
+            J(:,8:14) = JLi(Z, O, EE); 
+        otherwise
+            error('Invalid side'); 
+    end
+    
+    %J(:,15:20) = Jb(TW0, EE); 
+end
+
+function [ J ] = JLi(Z, O, EE)
+
+    J = zeros(6,7); 
+    P = repmat(EE, 1, 7) - O;
+    
+    for i = 1 : 7
+        J(:,i) = [cross(Z(:,i), P(:,i)); Z(:,i) ]; 
+    end
+    
+end
+
+function [ J ] = Jb(TW0, EE)
+    
+    J = eye(6); 
+    
+    Xb = TW0(1:3,4);            % Floating base origin in world frame
+    Xp = Transform(TW0, EE);    % End effector in world frame
+    
+    J(1:3,4) = cross(TW0(1:3,1), Xp-Xb); 
+    J(1:3,5) = cross(TW0(1:3,2), Xp-Xb); 
+    J(1:3,6) = cross(TW0(1:3,3), Xp-Xb); 
+    
+end
+
+% ------------------------------------------------------------------------
+% PRIORITIZATION
+% ------------------------------------------------------------------------
 
 function [ DQ ] = PrioritizedTask(Jh, DXh, Jl, DXl)
     
@@ -29,56 +77,6 @@ function [ DQ ] = PrioritizedTask(Jh, DXh, Jl, DXl)
     
     DQ = S * (Inverse(Jh)*DXh + Nh*Inverse(Jl)*DXl); 
 
-end
-
-% ------------------------------------------------------------------------
-% END-EFFECTOR JACOBIANS
-% ------------------------------------------------------------------------
-
-function [ J ] = JLi(TW0, T0N, EE)
-
-    J = zeros(6,13); 
-
-    Z = LegAxis(T0N);              % joint axes w.r.t. base frame
-    O = squeeze(T0N(1:3,4,:));  % joint origins w.r.t. base frame
-    
-    if (size(EE,2) == 1)
-        P = repmat(EE, 1, 7) - O;   % vector from joint origin to end effector
-    else
-        p = EE - 0; 
-    end
-    
-    for i = 1 : 7
-        J(:,i) = [cross(Z(:,i), P(:,i)); Z(:,i) ]; 
-    end
-    
-    J(:,8:13) = Jb(TW0, EE); 
-    
-end
-
-function [ J ] = Jb(TW0, EE)
-    J = eye(6); 
-    Rb = TW0(1:3,1:3); Xb = TW0(1:3,4); 
-    Xp = Transform(TW0, EE); 
-    J(1:3,4) = cross(Rb(1:3,1), Xp-Xb); 
-    J(1:3,5) = cross(Rb(1:3,2), Xp-Xb); 
-    J(1:3,6) = cross(Rb(1:3,3), Xp-Xb); 
-end
-
-% ------------------------------------------------------------------------
-% UTILITY FUNCTIONS
-% ------------------------------------------------------------------------
-
-
-function [ Z ] = LegAxis(T0N)
-    Z = zeros(3,7); 
-    Z(:,1) = T0N(1:3, 3, 1); 
-	Z(:,2) = T0N(1:3, 1, 2); 
-	Z(:,3) = T0N(1:3, 2, 3); 
-	Z(:,4) = T0N(1:3, 2, 4); 
-	Z(:,5) = T0N(1:3, 3, 5); 
-	Z(:,6) = T0N(1:3, 2, 6); 
-	Z(:,7) = T0N(1:3, 1, 7); 
 end
 
 % ------------------------------------------------------------------------
