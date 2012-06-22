@@ -4,22 +4,96 @@ function DQ = JacobianTransform(BIPED, DX)
     persistent S
     if isempty(S) S = [eye(14) zeros(14, 6)]; end
     
-    Ju = [...
-            Jleg(0, BIPED.L); ...
-            Jleg(1, BIPED.R); ...
-        ];
+    RB = BIPED.TW0(1:3,1:3); 
+    COM0 = Transform(inv(BIPED.TW0), BIPED.COM); 
     
+    J1 = Jcom(BIPED, RB, COM0); 
+%     J2 = Jleg(0, BIPED.L, RB);
+%     J3 = Jleg(1, BIPED.R, RB);
+%     
+%     Ju = [...
+%             J1; ...
+%             J2(1:3,:); ...
+%             J3(1:3,:)
+%         ];
+    Ju = J1; 
     DQ = S * Inverse(Ju) * DX;
 
 end
 
+% ------------------------------------------------------------------------
+% COM JACOBIANS
+% ------------------------------------------------------------------------
 
+function [ J ] = Jcom(BIPED, RB, COM)
+
+    J = zeros(3,20); 
+    J(:,1:7) = LegJCOM(BIPED.L); 
+    J(:,8:14) = LegJCOM(BIPED.R); 
+    J(:,15:17) = eye(3); 
+    J(:,18) = cross(RB(:,1), COM); 
+    J(:,19) = cross(RB(:,2), COM); 
+    J(:,20) = cross(RB(:,3), COM); 
+end
+
+function [ J ] = LegJCOM(LEG)
+
+    J = zeros(3,7); 
+    
+    persistent W
+    
+    if isempty(W)
+        W = LegWeights(LEG.M);
+    end
+
+	Z = LEG.Z;              % Joint axis w.r.t base
+    O = LEG.O;              % Joint origins w.r.t. base
+    XC = LEG.XC;            % COM position w.r.t. base
+    P = LegPCOM(LEG.M, XC);     % Partial COM's w.r.t. base
+   
+    for i = 1 : 7
+        J(:,i) = W(i) * cross(Z(:,i), P(:,i) - O(:,i)); 
+    end
+    
+end
+
+function [ P ] = LegPCOM(M, COM)
+
+    P = zeros(3,7); 
+    
+    for i = 1 : 7
+        P(:,i) = CenterOfMass(M(i:end), COM(:,i:end)); 
+    end
+
+end
+
+function [ W ] = LegWeights(M)
+        
+    Mtotal = sum(M); 
+    W = zeros(7,1); 
+    
+    for i = 1 : length(M)
+        W(i) = sum(M(i:end)) / Mtotal; 
+    end
+
+end
+
+function [ COM ] = CenterOfMass(M, X)
+
+    COM = zeros(3,1); 
+
+    for i = 1 : length(M)
+        COM = COM + (M(i) * X(:,i)); 
+    end
+    
+    COM = COM * (1/sum(M)); 
+end
 
 % ------------------------------------------------------------------------
 % END-EFFECTOR JACOBIANS
 % ------------------------------------------------------------------------
 
-function [ J ] = Jleg(SIDE, LEG)
+function [ J ] = Jleg(SIDE, LEG, RB)
     J = zeros(6,20); 
     
     Z = LEG.Z; 
@@ -37,7 +111,7 @@ function [ J ] = Jleg(SIDE, LEG)
             error('Invalid side'); 
     end
     
-    %J(:,15:20) = Jb(TW0, EE); 
+    %J(:,15:20) = Jb(RB, (EE-LEG.T0N(1:3,4,1))); 
 end
 
 function [ J ] = JLi(Z, O, EE)
@@ -51,16 +125,12 @@ function [ J ] = JLi(Z, O, EE)
     
 end
 
-function [ J ] = Jb(TW0, EE)
+function [ J ] = Jb(RB, EE)
     
     J = eye(6); 
-    
-    Xb = TW0(1:3,4);            % Floating base origin in world frame
-    Xp = Transform(TW0, EE);    % End effector in world frame
-    
-    J(1:3,4) = cross(TW0(1:3,1), Xp-Xb); 
-    J(1:3,5) = cross(TW0(1:3,2), Xp-Xb); 
-    J(1:3,6) = cross(TW0(1:3,3), Xp-Xb); 
+    J(1:3,4) = cross(RB(1:3,1), EE); 
+    J(1:3,5) = cross(RB(1:3,2), EE); 
+    J(1:3,6) = cross(RB(1:3,3), EE); 
     
 end
 
