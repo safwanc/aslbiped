@@ -1,20 +1,22 @@
 function DQ = JacobianTransform(BIPED, DX)
 %#codegen
 
-    persistent S
-    if isempty(S) S = [eye(14) zeros(14, 6)]; end
+    persistent L R LR S JB
+    if isempty(L)   L = 1; end
+    if isempty(R)   R = 2; end
+    if isempty(LR) LR = 0; end
+    if isempty(S)   S = [eye(14) zeros(14, 6)]; end
+    if isempty(JB) JB = [zeros(6,14) eye(6)];   end
     
     %% High Priority Tasks (Constraints + COM)
-    Jcom_xyz = Jcom(BIPED); 
-    
-    [Jh, DXh] = Jconstraint(0, BIPED, Jcom_xyz, DX(1:3)); 
+%   Jcom_xyz = Jcom(BIPED); 
+%   [Jh, DXh] = Jconstraint(0, BIPED, Jcom_xyz, DX(1:3)); 
 
-% 	Jl_xyzrpy = Jleg(1, BIPED.L, BIPED.TW0); 
-% 	DX0 = [R0W*DX(1:3); R0W*DX(4:6); R0W*DX(7:9)]; 
-%   [Jh, DXh] = Jconstraint(2, BIPED, [Jcom_xyz; Jl_xyzrpy], DX0); 
-    
+    Jl = Jleg(L, BIPED.L, BIPED.TW0); DXl = DX(7:12); 
+    [Jh, DXh] = Jconstraint(R, BIPED, JB, DX(1:6)); 
+
     DQ = S * Inverse(Jh) * DXh;
-
+    % DQ = S * PrioritizedTask(Jh, DXh, Jl, DXl);
 end
 
 function [ Jc, DXc ] = Jconstraint(SIDE, BIPED, J, DX)
@@ -32,10 +34,6 @@ function [ Jc, DXc ] = Jconstraint(SIDE, BIPED, J, DX)
         otherwise
             Js1 = Jleg(1, BIPED.L, BIPED.TW0);
             Js2 = Jleg(2, BIPED.R, BIPED.TW0); 
-            
-            % APPROACH 1: Position only
-%           Js = [Js1(1:3,:); Js2(1:3,:)]; 
-%           DXs = [BIPED.L.FOOT.V; BIPED.R.FOOT.V]; 
             
             % APPROACH 2: Position and Orientation
             Js = [Js1(1:6,:); Js2(1:6,:)]; 
@@ -138,31 +136,17 @@ function [ Jxy, Jz ] = SplitJcom(J)
     
 end
 
-
 % ------------------------------------------------------------------------
 % END-EFFECTOR JACOBIANS
 % ------------------------------------------------------------------------
 
-function [ J ] = Jtorso(BIPED)
-
-    J = zeros(6,20); 
-    EE = zeros(3,1); 
-    
-    J(:,1:7)    = JLi(BIPED.L.Z, BIPED.L.O, EE); 
-    J(:,8:14)   = JLi(BIPED.R.Z, BIPED.R.O, EE); 
-    J(:,15:20)  = Jb(BIPED.TW0, EE); 
-
-end
-
 function [ J ] = Jleg(SIDE, LEG, TW0)
     J = zeros(6,20); 
-    
-    Z = LEG.Z; 
-    O = LEG.O; 
-    EE = LEG.XF; 
-    
-    RB = TW0(1:3,1:3); 
-    
+    RB = TW0(1:3,1:3);
+    Z = RB * LEG.Z; %LEG.Z; 
+    O = TransformArray(TW0, LEG.O); %LEG.O; 
+    EE = Transform(TW0, LEG.XF); 
+
     switch(SIDE)
         case 1 
             % Left Leg
@@ -174,10 +158,11 @@ function [ J ] = Jleg(SIDE, LEG, TW0)
             error('Invalid side'); 
     end
     
+%     RB = TW0(1:3,1:3); 
 %     J(1:3,1:14) = RB * J(1:3,1:14); 
 %     J(4:6,1:14) = RB * J(4:6,1:14); 
-    
-    J(:,15:20) = Jb(TW0, EE); 
+     
+    J(:,15:20) = Jb(TW0, LEG.XF); 
 end
 
 function [ J ] = JLi(Z, O, EE)
@@ -211,11 +196,10 @@ end
 % PRIORITIZATION
 % ------------------------------------------------------------------------
 
-function [ DQ ] = PrioritizedTask(S, Jh, DXh, Jl, DXl)
+function [ DQ ] = PrioritizedTask(Jh, DXh, Jl, DXl)
 
     Nh = NullSpaceProjection(Jh); 
-    
-    DQ = S * (Inverse(Jh)*DXh + Nh*Inverse(Jl)*DXl); 
+    DQ = ((Inverse(Jh)*DXh) + (Nh*(Inverse(Jl)*DXl))); 
 
 end
 
@@ -263,8 +247,10 @@ end
 
 function [ N ] = NullSpaceProjection(J)
 
-    [~,n] = size(J); 
-    N = eye(n,n) - (Inverse(J) * J); 
+    persistent I 
+    if isempty(I) I = eye(20); end
+
+    N = I - (Inverse(J)*J); 
 
 end
 
@@ -273,6 +259,14 @@ function [ P0 ] = Transform(T0W, PW)
     P = T0W * [PW; 1]; 
     P0 = P(1:3); 
     
+end
+
+function [ A0 ] = TransformArray(T0W, A)
+    
+    n = size(A,2); 
+    P = T0W * [A; ones(1,n)]; 
+    A0 = P(1:3,:); 
+
 end
 
 function [ J ] = Jv(Jvw)
