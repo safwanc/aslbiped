@@ -8,16 +8,29 @@ function DQ = JacobianTransform(BIPED, DX)
     COM0 = Transform(inv(BIPED.TW0), BIPED.COM); 
     
     J1 = Jcom(BIPED, RB, COM0); 
-%     J2 = Jleg(0, BIPED.L, RB);
-%     J3 = Jleg(1, BIPED.R, RB);
-%     
-%     Ju = [...
-%             J1; ...
-%             J2(1:3,:); ...
-%             J3(1:3,:)
-%         ];
-    Ju = J1; 
-    DQ = S * Inverse(Ju) * DX;
+
+    [Jc, DXc] = Jconstraint(BIPED, DX); 
+    
+    if (rank(Jc(:,15:20)) ~= 6)
+        error('Constraint Jacobian Lost Rank'); 
+    end
+    
+    Ju = [Jc; J1]; 
+    
+    DQ = S * Inverse(Ju) * DXc;
+
+end
+
+function [ Jc, DXc ] = Jconstraint(BIPED, DX)
+
+    % generate a jacobian with respect to both legs being fixed on the
+    % ground. 
+    
+    Jc1 = Jleg(0, BIPED.L, BIPED.TW0); 
+    Jc2 = Jleg(1, BIPED.R, BIPED.TW0); 
+    
+    Jc = [Jc1(1:6,:); Jc2(1:6,:)]; 
+    DXc = [zeros(size(Jc,1),1); DX]; 
 
 end
 
@@ -93,7 +106,7 @@ end
 % END-EFFECTOR JACOBIANS
 % ------------------------------------------------------------------------
 
-function [ J ] = Jleg(SIDE, LEG, RB)
+function [ J ] = Jleg(SIDE, LEG, TW0)
     J = zeros(6,20); 
     
     Z = LEG.Z; 
@@ -111,7 +124,7 @@ function [ J ] = Jleg(SIDE, LEG, RB)
             error('Invalid side'); 
     end
     
-    %J(:,15:20) = Jb(RB, (EE-LEG.T0N(1:3,4,1))); 
+    J(:,15:20) = Jb(TW0, EE); 
 end
 
 function [ J ] = JLi(Z, O, EE)
@@ -125,12 +138,19 @@ function [ J ] = JLi(Z, O, EE)
     
 end
 
-function [ J ] = Jb(RB, EE)
+function [ J ] = Jb(TW0, EE)
     
     J = eye(6); 
-    J(1:3,4) = cross(RB(1:3,1), EE); 
-    J(1:3,5) = cross(RB(1:3,2), EE); 
-    J(1:3,6) = cross(RB(1:3,3), EE); 
+    Xb = TW0(1:3,4); Xp = Transform(TW0, EE); 
+    
+    z1 = TW0(1:3,1); 
+    z2 = TW0(1:3,2); 
+    z3 = TW0(1:3,3);
+    p = Xp - Xb; 
+    
+    J(1:3,4) = cross(z1, p); 
+    J(1:3,5) = cross(z2, p); 
+    J(1:3,6) = cross(z3, p); 
     
 end
 
