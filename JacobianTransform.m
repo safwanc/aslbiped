@@ -4,35 +4,53 @@ function DQ = JacobianTransform(BIPED, DX)
     persistent S
     if isempty(S) S = [eye(14) zeros(14, 6)]; end
     
-    T0W = inv(BIPED.TW0); 
-    
     %% High Priority Tasks (Constraints + COM)
-    COM0 = Transform(T0W, BIPED.COM); 
+    Jcom_xyz = Jcom(BIPED); 
     
-    [Jcom_xy, Jcom_z] = Jcom(BIPED, COM0); 
-    Jcom_xyz = [Jcom_xy; Jcom_z]; 
+    [Jh, DXh] = Jconstraint(0, BIPED, Jcom_xyz, DX(1:3)); 
 
-    [Jh, DXh] = Jconstraint(BIPED, Jcom_xyz, DX(1:3)); 
-
+% 	Jl_xyzrpy = Jleg(1, BIPED.L, BIPED.TW0); 
+% 	DX0 = [R0W*DX(1:3); R0W*DX(4:6); R0W*DX(7:9)]; 
+%   [Jh, DXh] = Jconstraint(2, BIPED, [Jcom_xyz; Jl_xyzrpy], DX0); 
+    
     DQ = S * Inverse(Jh) * DXh;
 
 end
 
-function [ Jc, DXc ] = Jconstraint(BIPED, J, DX)
+function [ Jc, DXc ] = Jconstraint(SIDE, BIPED, J, DX)
 
     % generate a jacobian with respect to both legs being fixed on the
     % ground. 
     
-    Js1 = Jleg(0, BIPED.L, BIPED.TW0); 
-    Js2 = Jleg(1, BIPED.R, BIPED.TW0); 
-    
-    Js = [Js1(1:6,:); Js2(1:6,:)]
-    
-	if (rank(Js(:,15:20)) ~= 6)
+    switch(SIDE)
+        case 1
+            Js = Jleg(1, BIPED.L, BIPED.TW0); 
+            DXs = [BIPED.L.FOOT.V; BIPED.L.FOOT.W]; 
+        case 2 
+            Js = Jleg(2, BIPED.R, BIPED.TW0); 
+            DXs = [BIPED.R.FOOT.V; BIPED.R.FOOT.W]; 
+        otherwise
+            Js1 = Jleg(1, BIPED.L, BIPED.TW0);
+            Js2 = Jleg(2, BIPED.R, BIPED.TW0); 
+            
+            % APPROACH 1: Position only
+%           Js = [Js1(1:3,:); Js2(1:3,:)]; 
+%           DXs = [BIPED.L.FOOT.V; BIPED.R.FOOT.V]; 
+            
+            % APPROACH 2: Position and Orientation
+            Js = [Js1(1:6,:); Js2(1:6,:)]; 
+            DXs = [...
+                BIPED.L.FOOT.V; BIPED.L.FOOT.W; ...
+                BIPED.R.FOOT.V; BIPED.R.FOOT.W; ...
+                ]; 
+    end
+
+    if (rank(Js(:,15:20)) ~= 6)
         error('Constraint Jacobian Lost Rank'); 
     end
-    
-    DXc = [zeros(size(Js,1),1); DX];
+
+    DXs = zeros(size(Js,1),1);
+    DXc = [DXs; DX];
 	Jc  = [Js; J];
 
     
@@ -42,19 +60,22 @@ end
 % COM JACOBIANS
 % ------------------------------------------------------------------------
 
-function [ Jxy, Jz ] = Jcom(BIPED, COM)
+function [ J ] = Jcom(BIPED)
 
     J = zeros(3,20); 
-    
+    RB = BIPED.TW0(1:3,1:3); 
+    PB = BIPED.TW0(1:3,4); 
+
     % Leg Contributions
     J(:,1:7) = LegJCOM(BIPED.L);    % Left Leg
     J(:,8:14) = LegJCOM(BIPED.R);   % Right Leg
     
     % Base Contribution
-    J(:,15:20) = Jv(Jb(BIPED.TW0, COM));
+    J(:,15:17) = eye(3); P = BIPED.COM - PB; 
+    Z1 = RB(:,1); J(:,18) = cross(Z1, P);  
+    Z2 = RB(:,2); J(:,19) = cross(Z2, P);  
+    Z3 = RB(:,3); J(:,20) = cross(Z3, P);  
     
-    Jxy = J(1:2,:); 
-    Jz = J(3,:); 
 end
 
 function [ J ] = LegJCOM(LEG)
@@ -67,9 +88,9 @@ function [ J ] = LegJCOM(LEG)
         W = LegWeights(LEG.M);
     end
 
-	Z = LEG.Z;              % Joint axis w.r.t base
-    O = LEG.O;              % Joint origins w.r.t. base
-    XC = LEG.XC;            % COM position w.r.t. base
+	Z = LEG.Z;                  % Joint axis w.r.t base
+    O = LEG.O;                  % Joint origins w.r.t. base
+    XC = LEG.XC;                % COM position w.r.t. base
     P = LegPCOM(LEG.M, XC);     % Partial COM's w.r.t. base
    
     for i = 1 : 7
@@ -110,6 +131,14 @@ function [ COM ] = CenterOfMass(M, X)
     COM = COM * (1/sum(M)); 
 end
 
+function [ Jxy, Jz ] = SplitJcom(J)
+
+	Jxy = J(1:2,:); 
+    Jz  = J(3,:); 
+    
+end
+
+
 % ------------------------------------------------------------------------
 % END-EFFECTOR JACOBIANS
 % ------------------------------------------------------------------------
@@ -132,16 +161,21 @@ function [ J ] = Jleg(SIDE, LEG, TW0)
     O = LEG.O; 
     EE = LEG.XF; 
     
+    RB = TW0(1:3,1:3); 
+    
     switch(SIDE)
-        case 0 
+        case 1 
             % Left Leg
             J(:,1:7) = JLi(Z, O, EE); 
-        case 1 
+        case 2 
             % Right Leg
             J(:,8:14) = JLi(Z, O, EE); 
         otherwise
             error('Invalid side'); 
     end
+    
+%     J(1:3,1:14) = RB * J(1:3,1:14); 
+%     J(4:6,1:14) = RB * J(4:6,1:14); 
     
     J(:,15:20) = Jb(TW0, EE); 
 end
