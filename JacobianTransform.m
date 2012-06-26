@@ -6,26 +6,15 @@ function DQ = JacobianTransform(BIPED, DX)
     
     T0W = inv(BIPED.TW0); 
     
-    DXcom = DX(1:3); 
-%    DXrpy = DX(4:6); 
-    
     %% High Priority Tasks (Constraints + COM)
     COM0 = Transform(T0W, BIPED.COM); 
     
-    J1 = Jcom(BIPED, COM0); 
+    [Jcom_xy, Jcom_z] = Jcom(BIPED, COM0); 
+    Jcom_xyz = [Jcom_xy; Jcom_z]; 
 
-    [Jh, DXh] = Jconstraint(BIPED, J1, DXcom); 
+    [Jh, DXh] = Jconstraint(BIPED, Jcom_xyz, DX(1:3)); 
 
     DQ = S * Inverse(Jh) * DXh;
-    
-    %% Low Priority Tasks (Base RPY)
-%     DXl = DXrpy; 
-%     Jl = zeros(3,20); 
-%     Jl(:,18:20) = eye(3);
-%     
-%     Jl = T0W(1:3,1:3) * Jl; 
-%     
-%     DQ = PrioritizedTask(Jh, DXh, Jl, DXl);
 
 end
 
@@ -37,7 +26,7 @@ function [ Jc, DXc ] = Jconstraint(BIPED, J, DX)
     Js1 = Jleg(0, BIPED.L, BIPED.TW0); 
     Js2 = Jleg(1, BIPED.R, BIPED.TW0); 
     
-    Js = [Js1(1:6,:); Js2(1:6,:)]; 
+    Js = [Js1(1:6,:); Js2(1:6,:)]
     
 	if (rank(Js(:,15:20)) ~= 6)
         error('Constraint Jacobian Lost Rank'); 
@@ -53,7 +42,7 @@ end
 % COM JACOBIANS
 % ------------------------------------------------------------------------
 
-function [ J ] = Jcom(BIPED, COM)
+function [ Jxy, Jz ] = Jcom(BIPED, COM)
 
     J = zeros(3,20); 
     
@@ -62,7 +51,10 @@ function [ J ] = Jcom(BIPED, COM)
     J(:,8:14) = LegJCOM(BIPED.R);   % Right Leg
     
     % Base Contribution
-    J(:,15:20) = Jv(Jb(BIPED.TW0, COM)); 
+    J(:,15:20) = Jv(Jb(BIPED.TW0, COM));
+    
+    Jxy = J(1:2,:); 
+    Jz = J(3,:); 
 end
 
 function [ J ] = LegJCOM(LEG)
@@ -122,6 +114,17 @@ end
 % END-EFFECTOR JACOBIANS
 % ------------------------------------------------------------------------
 
+function [ J ] = Jtorso(BIPED)
+
+    J = zeros(6,20); 
+    EE = zeros(3,1); 
+    
+    J(:,1:7)    = JLi(BIPED.L.Z, BIPED.L.O, EE); 
+    J(:,8:14)   = JLi(BIPED.R.Z, BIPED.R.O, EE); 
+    J(:,15:20)  = Jb(BIPED.TW0, EE); 
+
+end
+
 function [ J ] = Jleg(SIDE, LEG, TW0)
     J = zeros(6,20); 
     
@@ -174,11 +177,8 @@ end
 % PRIORITIZATION
 % ------------------------------------------------------------------------
 
-function [ DQ ] = PrioritizedTask(Jh, DXh, Jl, DXl)
-    
-    n = size(Jh, 2) - 6; 
-    
-    S = [eye(n) zeros(n,6)]; 
+function [ DQ ] = PrioritizedTask(S, Jh, DXh, Jl, DXl)
+
     Nh = NullSpaceProjection(Jh); 
     
     DQ = S * (Inverse(Jh)*DXh + Nh*Inverse(Jl)*DXl); 
