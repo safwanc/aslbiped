@@ -4,49 +4,65 @@ function DQ = JacobianTransform(BIPED, DX)
     persistent S
     if isempty(S) S = [eye(14) zeros(14, 6)]; end
     
-    RB = BIPED.TW0(1:3,1:3); 
-    COM0 = Transform(inv(BIPED.TW0), BIPED.COM); 
+    T0W = inv(BIPED.TW0); 
     
-    J1 = Jcom(BIPED, RB, COM0); 
+    DXcom = DX(1:3); 
+%    DXrpy = DX(4:6); 
+    
+    %% High Priority Tasks (Constraints + COM)
+    COM0 = Transform(T0W, BIPED.COM); 
+    
+    J1 = Jcom(BIPED, COM0); 
 
-    [Jc, DXc] = Jconstraint(BIPED, DX); 
+    [Jh, DXh] = Jconstraint(BIPED, J1, DXcom); 
+
+    DQ = S * Inverse(Jh) * DXh;
     
-    if (rank(Jc(:,15:20)) ~= 6)
-        error('Constraint Jacobian Lost Rank'); 
-    end
-    
-    Ju = [Jc; J1]; 
-    
-    DQ = S * Inverse(Ju) * DXc;
+    %% Low Priority Tasks (Base RPY)
+%     DXl = DXrpy; 
+%     Jl = zeros(3,20); 
+%     Jl(:,18:20) = eye(3);
+%     
+%     Jl = T0W(1:3,1:3) * Jl; 
+%     
+%     DQ = PrioritizedTask(Jh, DXh, Jl, DXl);
 
 end
 
-function [ Jc, DXc ] = Jconstraint(BIPED, DX)
+function [ Jc, DXc ] = Jconstraint(BIPED, J, DX)
 
     % generate a jacobian with respect to both legs being fixed on the
     % ground. 
     
-    Jc1 = Jleg(0, BIPED.L, BIPED.TW0); 
-    Jc2 = Jleg(1, BIPED.R, BIPED.TW0); 
+    Js1 = Jleg(0, BIPED.L, BIPED.TW0); 
+    Js2 = Jleg(1, BIPED.R, BIPED.TW0); 
     
-    Jc = [Jc1(1:6,:); Jc2(1:6,:)]; 
-    DXc = [zeros(size(Jc,1),1); DX]; 
+    Js = [Js1(1:6,:); Js2(1:6,:)]; 
+    
+	if (rank(Js(:,15:20)) ~= 6)
+        error('Constraint Jacobian Lost Rank'); 
+    end
+    
+    DXc = [zeros(size(Js,1),1); DX];
+	Jc  = [Js; J];
 
+    
 end
 
 % ------------------------------------------------------------------------
 % COM JACOBIANS
 % ------------------------------------------------------------------------
 
-function [ J ] = Jcom(BIPED, RB, COM)
+function [ J ] = Jcom(BIPED, COM)
 
     J = zeros(3,20); 
-    J(:,1:7) = LegJCOM(BIPED.L); 
-    J(:,8:14) = LegJCOM(BIPED.R); 
-    J(:,15:17) = eye(3); 
-    J(:,18) = cross(RB(:,1), COM); 
-    J(:,19) = cross(RB(:,2), COM); 
-    J(:,20) = cross(RB(:,3), COM); 
+    
+    % Leg Contributions
+    J(:,1:7) = LegJCOM(BIPED.L);    % Left Leg
+    J(:,8:14) = LegJCOM(BIPED.R);   % Right Leg
+    
+    % Base Contribution
+    J(:,15:20) = Jv(Jb(BIPED.TW0, COM)); 
 end
 
 function [ J ] = LegJCOM(LEG)
@@ -162,7 +178,7 @@ function [ DQ ] = PrioritizedTask(Jh, DXh, Jl, DXl)
     
     n = size(Jh, 2) - 6; 
     
-    S = [eye(n) zeros(6,n)]; 
+    S = [eye(n) zeros(n,6)]; 
     Nh = NullSpaceProjection(Jh); 
     
     DQ = S * (Inverse(Jh)*DXh + Nh*Inverse(Jl)*DXl); 
@@ -223,6 +239,14 @@ function [ P0 ] = Transform(T0W, PW)
     P = T0W * [PW; 1]; 
     P0 = P(1:3); 
     
+end
+
+function [ J ] = Jv(Jvw)
+    J = Jvw(1:3,:);     
+end
+
+function [ J ] = Jw(Jvw)
+    J = Jvw(4:6,:); 
 end
 
 % ////////////////////////////////////////////////////////////////////////
