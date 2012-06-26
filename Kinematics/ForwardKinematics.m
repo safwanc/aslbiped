@@ -1,20 +1,20 @@
-function BIPED = ForwardKinematics( X )
+function BIPED = ForwardKinematics( X, F )
 %#codegen
     
     persistent LEFT RIGHT
-    if isempty(LEFT) LEFT   = 0; end
-    if isempty(RIGHT) RIGHT = 1; end
+    if isempty(LEFT) LEFT   = 1; end
+    if isempty(RIGHT) RIGHT = 2; end
 
 	TW0 = reshape(X(1:16), 4, 4);  
        
-    L = BipedLeg(LEFT, X(17:23)); 
-    R = BipedLeg(RIGHT, X(24:30)); 
+    L = BipedLeg(LEFT, X(17:23), F(:,LEFT)); 
+    R = BipedLeg(RIGHT, X(24:30), F(:,RIGHT)); 
     B = BipedTorso; 
         
     M = [B.M L.M R.M]; 
     X = [B.XC L.XC R.XC]; 
     
-    COM0 = CenterOfMass(M, X) 
+    COM0 = CenterOfMass(M, X); 
     COMW = Transform(TW0, COM0); 
     
     BIPED = struct(...
@@ -41,7 +41,7 @@ function [ TOR ] = BipedTorso
     
 end
 
-function [ LEG ] = BipedLeg(SIDE, Q)
+function [ LEG ] = BipedLeg(SIDE, Q, F)
 	
     persistent M
     
@@ -51,7 +51,7 @@ function [ LEG ] = BipedLeg(SIDE, Q)
     COM = zeros(3,7); 
 
     switch(SIDE)
-        case 0
+        case 1
             T0(1:3,4) = [0 -0.13 -0.011525]';
             COM(:,1)  = [-0.0706089 -2.7E-07 0.02662483]';
             COM(:,2)  = [-0.00251109 0.03605746 -7.56E-06]';
@@ -60,7 +60,7 @@ function [ LEG ] = BipedLeg(SIDE, Q)
             COM(:,5)  = [-8.052E-05 0.00736782 -0.14617992]';
             COM(:,6)  = [0.00496159 0.02653546 -2E-08]';
             COM(:,7)  = [0.02543338 0 -0.04207567]';
-        case 1
+        case 2
             T0(1:3,4) = [0 0.13 -0.011525]';
             COM(:,1)  = [-0.0706089 -2.7E-07 0.02662483]';
             COM(:,2)  = [-0.00251109 -0.03605746 -7.56E-06]';
@@ -86,8 +86,19 @@ function [ LEG ] = BipedLeg(SIDE, Q)
         'M', M,     ...
         'XC', XC,   ...
         'XF', XF,   ...
-        'CP', CP    ...
+        'CP', CP,   ...
+        'FOOT', BipedFoot(F) ...
         ); 
+end
+
+function [ FOOT ] = BipedFoot( X )
+
+    FOOT = struct(...
+        'P', X(1:3),    ...
+        'V', X(4:6),    ... 
+        'W', X(7:9)     ...
+        ); 
+
 end
 
 
