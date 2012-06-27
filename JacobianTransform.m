@@ -1,6 +1,18 @@
-function DQ = JacobianTransform(BIPED, DX)
+function [DQ, RESET] = JacobianTransform(MODE, BIPED, DX)
 %#codegen
 
+    DQ = zeros(14,1); 
+    RESET = 0; 
+
+    % Controller State Variables
+    persistent LAST
+    if isempty(LAST)
+        LAST = struct( ...
+            'MODE', MODE ...
+            ); 
+    end
+
+    % Constant Variables (Optimization)
     persistent L R LR S JB I
     if isempty(L)   L = 1; end
     if isempty(R)   R = 2; end
@@ -9,33 +21,35 @@ function DQ = JacobianTransform(BIPED, DX)
     if isempty(S)   S = [eye(14) zeros(14, 6)]; end
     if isempty(JB) JB = [zeros(6,14) eye(6)];   end
     
-    
-    [ Jcom_xy, Jcom_z ] = SplitJcom(Jcom(BIPED)); 
-    DXcom_xy = DX(1:2); DXcom_z = DX(3); 
-    
-    Jbase_rpy = JB(4:6,:); 
-    DXbase_rpy = DX(4:6); 
+    if MODE ~= 0
+        [ Jcom_xy, Jcom_z ] = SplitJcom(Jcom(BIPED)); 
+        DXcom_xy = DX(1:2); DXcom_z = DX(3); 
 
-    Jswing = Jleg(L, BIPED.L, BIPED.TW0);
-    DXswing = DX(7:12); 
-    
-    %% High Priority Tasks
-    Jhigh   = [Jcom_xy;     Jswing]; 
-    DXhigh  = [DXcom_xy;    DXswing]; 
+        Jbase_rpy = JB(4:6,:); 
+        DXbase_rpy = DX(4:6); 
 
-    [Jh, DXh] = Jconstraint(R, BIPED, Jhigh, DXhigh); 
-    
-    %% Low Priority Tasks
+        Jswing = Jleg(L, BIPED.L, BIPED.TW0);
+        DXswing = DX(7:12); 
 
-    Jl  = Jcom_z; 
-    DXl = DXcom_z; 
+        %% High Priority Tasks
+        Jhigh   = [Jcom_xy; Jswing];
+        DXhigh  = [DXcom_xy; DXswing];  
+
+        [Jh, DXh] = Jconstraint(R, BIPED, Jhigh, DXhigh); 
+
+        %% Low Priority Tasks
+        Jl  = Jcom_z; 
+        DXl = DXcom_z; 
+
+        %% Prioritization Framework
+        DQ(:,:) = S * Prioritized(Jh, DXh, Jl, DXl); 
+    end
     
-%     Jlow  = [Jbase_rpy; Jcom_z]; 
-%     DXlow = [DXbase_rpy; DXcom_z]; 
-%     [Jl, DXl] = Jconstraint(LR, BIPED, Jlow, DXlow); 
+    if MODE ~= LAST.MODE
+        RESET = 1; 
+    end
     
-    %% Prioritization Framework
-    DQ = S * Prioritized(Jh, DXh, Jl, DXl); 
+    LAST.MODE = MODE; 
 end
 
 function [ DQ ] = Prioritized(J1, X1, J2, X2)
@@ -46,21 +60,40 @@ end
 
 function [ Jc, DXc ] = Jconstraint(SIDE, BIPED, J, DX)
     
+    DXs = zeros(6,1);
+    
      switch(SIDE)
          
         case 1  % Left Foot Single Support 
             Js = Jleg(1, BIPED.L, BIPED.TW0); 
-            DXs = [BIPED.L.FOOT.V; BIPED.L.FOOT.W]; 
+            if ~InContact(BIPED.R.FOOT)
+                DXs = [BIPED.L.FOOT.V; BIPED.L.FOOT.W]; 
+            end
             
         case 2 % Right Foot Single Support 
             Js = Jleg(2, BIPED.R, BIPED.TW0); 
-            DXs = [BIPED.R.FOOT.V; BIPED.R.FOOT.W]; 
+            if ~InContact(BIPED.L.FOOT)
+                DXs = [BIPED.R.FOOT.V; BIPED.R.FOOT.W]; 
+            end
             
-        otherwise % Double Support  
-            Js1 = Jleg(1, BIPED.L, BIPED.TW0);
-            Js2 = Jleg(2, BIPED.R, BIPED.TW0);
-            Js = [Js1(1:6,:); Js2(1:6,:)]; 
-            DXs = zeros(size(Js,1),1);
+         otherwise
+             error('Unsupported'); 
+            
+            %DXs = [BIPED.R.FOOT.V; BIPED.R.FOOT.W]; 
+%         otherwise % Double Support  
+%             Js1 = Jleg(1, BIPED.L, BIPED.TW0);
+%             Js2 = Jleg(2, BIPED.R, BIPED.TW0);
+%             Js = [Js1(1:6,:); Js2(1:6,:)]; 
+%             DXs = [...
+%                 BIPED.L.FOOT.V; BIPED.L.FOOT.W; ...
+%                 BIPED.R.FOOT.V; BIPED.R.FOOT.W; ...
+%                 ]; 
+%             DXs = [...
+%                 BIPED.L.FOOT.V; zeros(3,1); ...
+%                 BIPED.R.FOOT.V; zeros(3,1); ...
+%                 ]; 
+%             
+            % DXs = zeros(size(Js,1),1);
             
      end
     
@@ -71,6 +104,16 @@ function [ Jc, DXc ] = Jconstraint(SIDE, BIPED, J, DX)
     DXc = [DXs; DX];
 	Jc  = [Js; J];
     
+end
+
+function [ c ] = InContact(FOOT)
+
+    c = 0; 
+    
+    if sum(FOOT.CF(end,:)) > 0
+        c = 1; 
+    end
+
 end
 
 % ------------------------------------------------------------------------
@@ -84,8 +127,8 @@ function [ J ] = Jcom(BIPED)
     [RB, PB] = Decompose(BIPED.TW0); 
     
     % Leg Contributions
-    J(:,1:7)  = LegJCOM(BIPED.L);      % Left Leg
-    J(:,8:14) = LegJCOM(BIPED.R);      % Right Leg
+    J(:,1:7)  = RB * LegJCOM(BIPED.L);      % Left Leg
+    J(:,8:14) = RB * LegJCOM(BIPED.R);      % Right Leg
     
     % Base Contribution
     J(:,15:17) = eye(3);
@@ -156,14 +199,14 @@ end
 
 function [ J ] = Jleg(SIDE, LEG, TW0)
     J = zeros(6,20); 
-%     RB = TW0(1:3,1:3);
-%     Z = RB * LEG.Z; %LEG.Z; 
-%     O = TransformArray(TW0, LEG.O); %LEG.O; 
-%     EE = Transform(TW0, LEG.XF); 
+    RB = TW0(1:3,1:3);
+    Z = RB * LEG.Z; %LEG.Z; 
+    O = TransformArray(TW0, LEG.O); %LEG.O; 
+    EE = Transform(TW0, LEG.XF); 
 
-    Z = LEG.Z; 
-    O = LEG.O; 
-    EE = LEG.XF; 
+%     Z = LEG.Z; 
+%     O = LEG.O; 
+%     EE = LEG.XF; 
     
     switch(SIDE)
         case 1 
