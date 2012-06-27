@@ -15,21 +15,32 @@ function DQ = JacobianTransform(BIPED, DX)
     
     Jbase_rpy = JB(4:6,:); 
     DXbase_rpy = DX(4:6); 
-    
+
     Jswing = Jleg(L, BIPED.L, BIPED.TW0);
     DXswing = DX(7:12); 
     
     %% High Priority Tasks
     Jhigh   = [Jcom_xy;     Jswing]; 
     DXhigh  = [DXcom_xy;    DXswing]; 
+
     [Jh, DXh] = Jconstraint(R, BIPED, Jhigh, DXhigh); 
     
     %% Low Priority Tasks
-    Jl  = [Jcom_z;  Jbase_rpy]; 
-    DXl = [DXcom_z; DXbase_rpy]; 
+
+    Jl  = Jcom_z; 
+    DXl = DXcom_z; 
+    
+%     Jlow  = [Jbase_rpy; Jcom_z]; 
+%     DXlow = [DXbase_rpy; DXcom_z]; 
+%     [Jl, DXl] = Jconstraint(LR, BIPED, Jlow, DXlow); 
     
     %% Prioritization Framework
-    DQ = S * ((Inverse(Jh)*DXh) + (I-(Inverse(Jh)*Jh))*(Inverse(Jl)*DXl));  
+    DQ = S * Prioritized(Jh, DXh, Jl, DXl); 
+end
+
+function [ DQ ] = Prioritized(J1, X1, J2, X2)
+
+    DQ = Inverse(J1)*X1 + (Inverse(J2*Null(J1))*(X2-(J2*Inverse(J1)*X1))); 
 
 end
 
@@ -73,8 +84,8 @@ function [ J ] = Jcom(BIPED)
     [RB, PB] = Decompose(BIPED.TW0); 
     
     % Leg Contributions
-    J(:,1:7)  = RB * LegJCOM(BIPED.L);      % Left Leg
-    J(:,8:14) = RB * LegJCOM(BIPED.R);      % Right Leg
+    J(:,1:7)  = LegJCOM(BIPED.L);      % Left Leg
+    J(:,8:14) = LegJCOM(BIPED.R);      % Right Leg
     
     % Base Contribution
     J(:,15:17) = eye(3);
