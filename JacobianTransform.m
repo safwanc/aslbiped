@@ -1,56 +1,64 @@
 function DQ = JacobianTransform(BIPED, DX)
 %#codegen
 
-    persistent L R LR S JB
+    persistent L R LR S JB I
     if isempty(L)   L = 1; end
     if isempty(R)   R = 2; end
     if isempty(LR) LR = 0; end
+    if isempty(I)   I = eye(20); end
     if isempty(S)   S = [eye(14) zeros(14, 6)]; end
     if isempty(JB) JB = [zeros(6,14) eye(6)];   end
     
-    %% High Priority Tasks (Constraints + COM)
-%   Jcom_xyz = Jcom(BIPED); 
-%   [Jh, DXh] = Jconstraint(0, BIPED, Jcom_xyz, DX(1:3)); 
+    
+    [ Jcom_xy, Jcom_z ] = SplitJcom(Jcom(BIPED)); 
+    DXcom_xy = DX(1:2); DXcom_z = DX(3); 
+    
+    Jbase_rpy = JB(4:6,:); 
+    DXbase_rpy = DX(4:6); 
+    
+    Jswing = Jleg(L, BIPED.L, BIPED.TW0);
+    DXswing = DX(7:12); 
+    
+    %% High Priority Tasks
+    Jhigh   = [Jcom_xy;     Jswing]; 
+    DXhigh  = [DXcom_xy;    DXswing]; 
+    [Jh, DXh] = Jconstraint(R, BIPED, Jhigh, DXhigh); 
+    
+    %% Low Priority Tasks
+    Jl  = [Jcom_z;  Jbase_rpy]; 
+    DXl = [DXcom_z; DXbase_rpy]; 
+    
+    %% Prioritization Framework
+    DQ = S * ((Inverse(Jh)*DXh) + (I-(Inverse(Jh)*Jh))*(Inverse(Jl)*DXl));  
 
-    Jl = Jleg(L, BIPED.L, BIPED.TW0); DXl = DX(7:12); 
-    [Jh, DXh] = Jconstraint(R, BIPED, JB, DX(1:6)); 
-
-    DQ = S * Inverse(Jh) * DXh;
-    % DQ = S * PrioritizedTask(Jh, DXh, Jl, DXl);
 end
 
 function [ Jc, DXc ] = Jconstraint(SIDE, BIPED, J, DX)
-
-    % generate a jacobian with respect to both legs being fixed on the
-    % ground. 
     
-    switch(SIDE)
-        case 1
+     switch(SIDE)
+         
+        case 1  % Left Foot Single Support 
             Js = Jleg(1, BIPED.L, BIPED.TW0); 
             DXs = [BIPED.L.FOOT.V; BIPED.L.FOOT.W]; 
-        case 2 
+            
+        case 2 % Right Foot Single Support 
             Js = Jleg(2, BIPED.R, BIPED.TW0); 
             DXs = [BIPED.R.FOOT.V; BIPED.R.FOOT.W]; 
-        otherwise
-            Js1 = Jleg(1, BIPED.L, BIPED.TW0);
-            Js2 = Jleg(2, BIPED.R, BIPED.TW0); 
             
-            % APPROACH 2: Position and Orientation
+        otherwise % Double Support  
+            Js1 = Jleg(1, BIPED.L, BIPED.TW0);
+            Js2 = Jleg(2, BIPED.R, BIPED.TW0);
             Js = [Js1(1:6,:); Js2(1:6,:)]; 
-            DXs = [...
-                BIPED.L.FOOT.V; BIPED.L.FOOT.W; ...
-                BIPED.R.FOOT.V; BIPED.R.FOOT.W; ...
-                ]; 
-    end
-
+            DXs = zeros(size(Js,1),1);
+            
+     end
+    
     if (rank(Js(:,15:20)) ~= 6)
         error('Constraint Jacobian Lost Rank'); 
     end
 
-    DXs = zeros(size(Js,1),1);
     DXc = [DXs; DX];
 	Jc  = [Js; J];
-
     
 end
 
@@ -61,18 +69,16 @@ end
 function [ J ] = Jcom(BIPED)
 
     J = zeros(3,20); 
-    RB = BIPED.TW0(1:3,1:3); 
-    PB = BIPED.TW0(1:3,4); 
-
+    
+    [RB, PB] = Decompose(BIPED.TW0); 
+    
     % Leg Contributions
-    J(:,1:7) = LegJCOM(BIPED.L);    % Left Leg
-    J(:,8:14) = LegJCOM(BIPED.R);   % Right Leg
+    J(:,1:7)  = RB * LegJCOM(BIPED.L);      % Left Leg
+    J(:,8:14) = RB * LegJCOM(BIPED.R);      % Right Leg
     
     % Base Contribution
-    J(:,15:17) = eye(3); P = BIPED.COM - PB; 
-    Z1 = RB(:,1); J(:,18) = cross(Z1, P);  
-    Z2 = RB(:,2); J(:,19) = cross(Z2, P);  
-    Z3 = RB(:,3); J(:,20) = cross(Z3, P);  
+    J(:,15:17) = eye(3);
+    J(:,18:20) = Rcross(RB, BIPED.COM-PB); 
     
 end
 
@@ -81,10 +87,7 @@ function [ J ] = LegJCOM(LEG)
     J = zeros(3,7); 
     
     persistent W
-    
-    if isempty(W)
-        W = LegWeights(LEG.M);
-    end
+    if isempty(W) W = LegWeights(LEG.M); end
 
 	Z = LEG.Z;                  % Joint axis w.r.t base
     O = LEG.O;                  % Joint origins w.r.t. base
@@ -142,11 +145,15 @@ end
 
 function [ J ] = Jleg(SIDE, LEG, TW0)
     J = zeros(6,20); 
-    RB = TW0(1:3,1:3);
-    Z = RB * LEG.Z; %LEG.Z; 
-    O = TransformArray(TW0, LEG.O); %LEG.O; 
-    EE = Transform(TW0, LEG.XF); 
+%     RB = TW0(1:3,1:3);
+%     Z = RB * LEG.Z; %LEG.Z; 
+%     O = TransformArray(TW0, LEG.O); %LEG.O; 
+%     EE = Transform(TW0, LEG.XF); 
 
+    Z = LEG.Z; 
+    O = LEG.O; 
+    EE = LEG.XF; 
+    
     switch(SIDE)
         case 1 
             % Left Leg
@@ -157,10 +164,6 @@ function [ J ] = Jleg(SIDE, LEG, TW0)
         otherwise
             error('Invalid side'); 
     end
-    
-%     RB = TW0(1:3,1:3); 
-%     J(1:3,1:14) = RB * J(1:3,1:14); 
-%     J(4:6,1:14) = RB * J(4:6,1:14); 
      
     J(:,15:20) = Jb(TW0, LEG.XF); 
 end
@@ -179,28 +182,11 @@ end
 function [ J ] = Jb(TW0, EE)
     
     J = eye(6); 
-    Xb = TW0(1:3,4); Xp = Transform(TW0, EE); 
     
-    z1 = TW0(1:3,1); 
-    z2 = TW0(1:3,2); 
-    z3 = TW0(1:3,3);
-    p = Xp - Xb; 
+    [RB, PB] = Decompose(TW0); 
+    P = Transform(TW0, EE) - PB; 
+    J(1:3,4:6) = Rcross(RB, P); 
     
-    J(1:3,4) = cross(z1, p); 
-    J(1:3,5) = cross(z2, p); 
-    J(1:3,6) = cross(z3, p); 
-    
-end
-
-% ------------------------------------------------------------------------
-% PRIORITIZATION
-% ------------------------------------------------------------------------
-
-function [ DQ ] = PrioritizedTask(Jh, DXh, Jl, DXl)
-
-    Nh = NullSpaceProjection(Jh); 
-    DQ = ((Inverse(Jh)*DXh) + (Nh*(Inverse(Jl)*DXl))); 
-
 end
 
 % ------------------------------------------------------------------------
@@ -209,14 +195,15 @@ end
 
 function [ Ainv ] = Inverse( A )
     
-    [m, n] = size(A); 
+    [m, n] = size(A);
+    Ainv = zeros(n,m); 
     
     persistent k; 
     if isempty(k) k = 1e-3; end
     
     if (m == n)
         % Square Matrix 
-        Ainv = inv(A);
+        Ainv(:,:) = inv(A);
     else
         if k == 0 
             % METHOD 1: Pseudoinverse
@@ -225,12 +212,12 @@ function [ Ainv ] = Inverse( A )
             % METHOD 2: Singularity Robust Inverse
             AAt = A * A'; 
             kI  = k * eye(size(AAt)); 
-            Ainv = A'/(AAt + kI); 
+            Ainv(:,:) = A'/(AAt + kI); 
         end
     end
 end
 
-function [ S ] = SkewSymmetric( a )
+function [ S ] = Skew( a )
 %SKEWSYMMETRIC Returns a 3x3 skew symmetric matrix for a 3x1 vector 'a'
     
     if length(a) ~= 3
@@ -245,12 +232,10 @@ function [ S ] = SkewSymmetric( a )
 
 end
 
-function [ N ] = NullSpaceProjection(J)
+function [ N ] = Null(J)
 
-    persistent I 
-    if isempty(I) I = eye(20); end
-
-    N = I - (Inverse(J)*J); 
+    [~,n] = size(J); 
+    N = eye(n,n) - (Inverse(J)*J); 
 
 end
 
@@ -275,6 +260,15 @@ end
 
 function [ J ] = Jw(Jvw)
     J = Jvw(4:6,:); 
+end
+
+function [ X ] = Rcross(R, P)
+    X = [cross(R(:,1), P) cross(R(:,2), P) cross(R(:,3), P)]; 
+end
+
+function [ R, P ] = Decompose(T)
+    R = T(1:3, 1:3); 
+    P = T(1:3, 4); 
 end
 
 % ////////////////////////////////////////////////////////////////////////
