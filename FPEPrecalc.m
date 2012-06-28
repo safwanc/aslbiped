@@ -1,4 +1,5 @@
 function [ Wavg, Icom ] = FPEPrecalc( WB, DQ, COM, T0X, CGX )
+%#codegen
 
     persistent I 
     if isempty(I) I = GetConstant('I'); end
@@ -34,7 +35,7 @@ function [ Wavg ] = CalculateWavg(Iyy, Wy)
         W = W + (Iyy(i)*Wy(i)); 
     end
     
-    Wavg = W / sum(W); 
+    Wavg = W / sum(Iyy); 
 
 end
 
@@ -62,7 +63,7 @@ function [ R ] = GetRotationMatrices(T0X)
     TColumns = reshape(T0X, 16, 15); 
     
     for i = 1 : 15
-        T(:,:,i) = reshape(TColumns, 4, 4); 
+        T(:,:,i) = reshape(TColumns(:,i), 4, 4); 
     end
     
     R = squeeze(T(1:3,1:3,:)); 
