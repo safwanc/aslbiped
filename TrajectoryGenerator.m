@@ -23,6 +23,9 @@ function [ XCOM, XLP, XRP ] = ...
         switch(STATE)
             case {FPEState.LeftPush, FPEState.RightPush}
                 XCOM = [STAND(1) STAND(2) COMH]'; 
+            case {FPEState.LeftLift, FPEState.RightLift}
+                XCOM = LAST.XCOM; 
+                SWING(3) = GNDCLR; 
             otherwise
                 error('Unsupported State'); 
         end
