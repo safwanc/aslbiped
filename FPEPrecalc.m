@@ -15,27 +15,25 @@ function [ Wavg, Icom ] = FPEPrecalc( WB, DQ, COM, T0X, CGX )
     Iyy = squeeze(Iw(2,2,:));
     Icom = CalculateIcom(COM, CGX, Iyy); 
 
-    W = GetAngularVelocities(DQ);
-    for i = 1 : 14
-        W(:,i) = Rw(:,:,i+1) * W(:,i); 
+    W = [WB GetAngularVelocities(DQ)];
+    for i = 2 : 15
+        W(:,i) = Rw(:,:,i) * W(:,i); 
     end
-    Wy = zeros(15,1);
-    Wy(1) = WB(2); % Base angular velocity (pitch component)
-    Wy(2:15) = squeeze(W(2,:)); 
     
-    Wavg = CalculateWavg(Iyy, Wy); 
+    Wavg = CalculateWavg(Iw, Iyy, W); 
 
 end
 
-function [ Wavg ] = CalculateWavg(Iyy, Wy)
+function [ Wavg ] = CalculateWavg(Iw, Iyy, W)
 
-    W = 0; 
+    num = 0; 
+    den = sum(Iyy); 
     
     for i = 1 : 15
-        W = W + (Iyy(i)*Wy(i)); 
+        num = num + sum(Iw(2,:,i) .* W(:,i)'); 
     end
     
-    Wavg = W / sum(Iyy); 
+    Wavg = num / den; 
 
 end
 
