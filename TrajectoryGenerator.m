@@ -22,10 +22,30 @@ function [ XCOM, XLP, XRP ] = ...
         
         switch(STATE)
             case {FPEState.LeftPush, FPEState.RightPush}
+                
                 XCOM = [STAND(1) STAND(2) COMH]'; 
+                SWING(3) = GNDH; 
+                STAND(3) = GNDH; 
+                
             case {FPEState.LeftLift, FPEState.RightLift}
+                
                 XCOM = LAST.XCOM; 
+                SWING(3) = GNDCLR;
+                
+            case {FPEState.LeftSwing, FPEState.RightSwing}
+                
+                XCOM = LAST.XCOM; 
+                XCOM(1) = XCOM(1) + STEPL/2; 
+                
+                SWING(1) = SWING(1) + STEPL; 
                 SWING(3) = GNDCLR; 
+                
+                if (STAND(2) > SWING(2)) % RIGHT FOOT STANCE
+                    SWING(2) = STAND(2) - STEPW; 
+                else
+                    SWING(2) = STAND(2) + STEPW; 
+                end
+                
             otherwise
                 error('Unsupported State'); 
         end
