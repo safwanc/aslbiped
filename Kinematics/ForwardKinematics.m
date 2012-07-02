@@ -1,4 +1,4 @@
-function BIPED = ForwardKinematics( X, F )
+function BIPED = ForwardKinematics( X, T, F )
 %#codegen
     
     persistent LEFT RIGHT
@@ -6,11 +6,11 @@ function BIPED = ForwardKinematics( X, F )
     if isempty(RIGHT) RIGHT = 2; end
 
 	TW0 = reshape(X(1:16), 4, 4);  
-       
+	
+	B = BipedTorso(T); 
     L = BipedLeg(LEFT, X(17:23), F(:,LEFT)); 
     R = BipedLeg(RIGHT, X(24:30), F(:,RIGHT)); 
-    B = BipedTorso; 
-        
+
     M = [B.M L.M R.M]; 
     X = [B.XC L.XC R.XC]; 
     
@@ -25,7 +25,7 @@ end
 
 %% Data Structures
 
-function [ TOR ] = BipedTorso
+function [ TOR ] = BipedTorso(T)
     
     persistent Mb COMb
     
@@ -37,7 +37,14 @@ function [ TOR ] = BipedTorso
         COMb = [-6.492E-05 1.11E-06 0.04112821]'; 
     end
     
-    TOR = struct('M', Mb, 'XC', COMb); 
+    TOR = struct(...
+        'M',    Mb,     ...
+        'XC',   COMb,   ...
+        'P',    T(1:3), ...
+        'V',    T(4:6), ...
+        'O',    T(7:9), ...
+        'W',    T(10:12) ...
+        ); 
     
 end
 
