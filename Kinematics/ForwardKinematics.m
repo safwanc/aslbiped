@@ -5,11 +5,11 @@ function BIPED = ForwardKinematics( X, T, F )
     if isempty(LEFT) LEFT   = 1; end
     if isempty(RIGHT) RIGHT = 2; end
 
-	TW0 = reshape(X(1:16), 4, 4);  
+	TW0 = [GetRotMatrix(X(4:6)) X(1:3); 0 0 0 1];   
 	
 	B = BipedTorso(T); 
-    L = BipedLeg(LEFT, X(17:23), F(:,LEFT)); 
-    R = BipedLeg(RIGHT, X(24:30), F(:,RIGHT)); 
+    L = BipedLeg(LEFT, X(7:13), F(:,LEFT)); 
+    R = BipedLeg(RIGHT, X(14:20), F(:,RIGHT)); 
 
     M = [B.M L.M R.M]; 
     X = [B.XC L.XC R.XC]; 
@@ -198,6 +198,16 @@ function [ P0 ] = Transform(T0W, PW)
     P = T0W * [PW; 1]; 
     P0 = P(1:3); 
     
+end
+
+function [ R ] = GetRotMatrix(RPY)
+
+    RRoll   = Rx(RPY(1)); 
+    RPitch  = Ry(RPY(2)); 
+    RYaw    = Rz(RPY(3)); 
+    
+    R = RYaw * RPitch * RRoll;
+
 end
 
 function [ R ] = Rx(q)
