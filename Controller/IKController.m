@@ -23,8 +23,8 @@ function QREF = IKController(BIPED, STATE, XREF, X)
     
     if isempty(FPEOFFSET)
         OFFSET = struct(...
-            'STAND',    0.100,  ...
-            'WALK',     0.000,  ...
+            'STAND',    0.135,  ...
+            'WALK',     0.130,  ...
             'NONE',     0.000   ...
             ); 
         
@@ -95,6 +95,9 @@ function QREF = IKController(BIPED, STATE, XREF, X)
             HOLD.Q = QREF; 
             IMPACTDETECTED = 1; % to avoid race conditions
             
+            % @EXPERIMENT: Fix Torso Orientation: 
+            % HOLD.Q = FixOrientation(TO, Q); 
+            
         else
             
             %% PRE IMPACT  -----------------------------------------------
@@ -133,7 +136,7 @@ function QREF = IKController(BIPED, STATE, XREF, X)
         % Hold joint values until contact forces stabilize. 
         QREF = HOLD.Q;
         
-        % @TODO: Update at regular intervals? 
+        % @EXPERIMENT: Update at regular intervals? 
         if (IMPACTCLOCK == UPDATEINTERVAL) 
             IMPACTCLOCK = 0; 
             %HOLD.Q(8:14) = Q(8:14); 
@@ -161,6 +164,23 @@ function [TORSOROLL, TORSOPITCH, TORSOYAW] = TorsoOrientation(STANDLEG)
     TORSOPITCH  = TF(2); 
     TORSOYAW    = TF(3); 
     
+end
+
+function [ QREF ] = FixOrientation(TO, Q)
+    % @UNFINISHED
+    R = TO(1); 
+    P = TO(2); 
+    Y = TO(3); 
+    
+    QREF = Q; 
+    
+    QREF(2) = QREF(2) + R; 
+    %QREF(7) = QREF(7) - R; 
+    
+    QREF(9) = QREF(9) - R; 
+    %QREF(14) = QREF(14) + R; 
+    
+
 end
 
 function [QHIP, QKNEE] = TrackPhi(TW0, SWINGLEG, FPEX, OFFSET)

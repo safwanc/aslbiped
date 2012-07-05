@@ -4,7 +4,7 @@ function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
     global IMPACT
     persistent LAST IMPACTCLOCK IMPACTINTERVAL IMPACTDETECTED
     persistent HIPZ HIPX HIPY KNEEY ANKLEZ ANKLEY ANKLEX
-	persistent QL QR ALL PITCH FOOT
+	persistent QL QR ALL PITCH FOOT DEBUGSTEP BREAKPOINT
     
     SWINGFOOT = LP; 
     % @TODO: Remove LP
@@ -30,7 +30,7 @@ function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
     end
     
     if isempty(IMPACTINTERVAL)
-        IMPACTINTERVAL = 5000; 
+        IMPACTINTERVAL = 2000; 
     end
     
     if isempty(IMPACTCLOCK)
@@ -59,6 +59,14 @@ function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
     
     if isempty(FOOT)
         FOOT = [ANKLEY ANKLEX]; 
+    end
+    
+    if isempty(DEBUGSTEP)
+        DEBUGSTEP = 0; 
+    end
+    
+    if isempty(BREAKPOINT)
+        BREAKPOINT = 30; 
     end
 
     % -------------------------------------------------------------
@@ -121,7 +129,7 @@ function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
                 Kp(SWING) = 500;
                 Kd(SWING) = 10; 
                 
-                Kp(STAND) = 100;
+                Kp(STAND) = 500;
                 Kd(STAND) = 10; 
                 
                 Kp(STAND(FOOT)) = 0; 
@@ -131,11 +139,22 @@ function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
                     
                     %% PRE IMPACT  ----------------------------------------
                     if (SWINGFOOT(end) <= 0.03)
-                        Kp(SWING(KNEEY)) = 0;
-                        Kd(SWING(KNEEY)) = 0;
+%                         Kp(SWING(PITCH)) = 50;
+%                         Kd(SWING(PITCH)) = 2;
+%                         Kp(SWING([HIPX ANKLEX])) = 0;
+%                         Kd(SWING([HIPX ANKLEX])) = 0;
+                        
+%                         Kp(SWING) = 50;
+%                         Kd(SWING) = 2; 
+%                         
+%                         Kp(STAND) = 50;
+%                         Kd(STAND) = 2; 
                         
 %                         Kp(SWING(FOOT)) = 0;
 %                         Kd(SWING(FOOT)) = 0;
+%                         
+%                         Kp(STAND(FOOT)) = 0;
+%                         Kd(STAND(FOOT)) = 0;
                     end
                     
                 elseif (IMPACT && ~IMPACTDETECTED)
@@ -154,11 +173,11 @@ function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
                         % current joint angles for a predefined period of
                         % time. 
                         
-                        Kp(SWING) = KP; 
-                        Kd(SWING) = 12;
+                        Kp(SWING) = 1000; 
+                        Kd(SWING) = 10;
                         
-                        Kp(STAND) = KP; 
-                        Kd(STAND) = 12;
+                        Kp(STAND) = 1000; 
+                        Kd(STAND) = 10;
                         
                         %Kp(SWING(PITCH)) = 500; 
                         %Kd(SWING(PITCH)) = 10;
@@ -171,6 +190,13 @@ function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
 %                         
 %                         Kp(STAND([ANKLEX ANKLEY KNEEY])) = 100; 
 %                         Kd(STAND([ANKLEX ANKLEY KNEEY])) = 10;
+
+                        DEBUGSTEP = min(DEBUGSTEP+1, BREAKPOINT);
+
+                        if (DEBUGSTEP == BREAKPOINT)
+                            DEBUGSTEP = 0; 
+                        end
+
                     else
                         
                         %% POST IMPACT  -----------------------------------
