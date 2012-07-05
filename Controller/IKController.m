@@ -2,7 +2,8 @@ function QREF = IKController(BIPED, STATE, XREF, X)
 %#codegen
 
     global IMPACT
-    persistent HOLD LAST STEP BREAKPOINT FPEOFFSET IMPACTDETECTED
+    persistent HOLD LAST DEBUGSTEP BREAKPOINT FPEOFFSET 
+    persistent IMPACTDETECTED IMPACTCLOCK UPDATEINTERVAL
     
     TO = X(4:6); 
     Q  = X(7:20); 
@@ -41,8 +42,8 @@ function QREF = IKController(BIPED, STATE, XREF, X)
             FPEOFFSET = OFFSET.STAND;
     end
     
-    if isempty(STEP)
-        STEP = 0; 
+    if isempty(DEBUGSTEP)
+        DEBUGSTEP = 0; 
     end
     
     if isempty(BREAKPOINT)
@@ -53,7 +54,15 @@ function QREF = IKController(BIPED, STATE, XREF, X)
         IMPACTDETECTED = 0; 
     end
     
-    STEP = min(STEP+1, BREAKPOINT);
+    if isempty(UPDATEINTERVAL)
+        UPDATEINTERVAL = 500; 
+    end
+    
+    if isempty(IMPACTCLOCK)
+        IMPACTCLOCK = 0; 
+    end
+    
+    DEBUGSTEP = min(DEBUGSTEP+1, BREAKPOINT);
     
     % -------------------------------------------------------------
     % STATE/MODE DEPENDENT
@@ -76,18 +85,23 @@ function QREF = IKController(BIPED, STATE, XREF, X)
     
     
     if ~IMPACTDETECTED
+        
         if GroundContact(SWINGLEG)
             
-            % Check if an impact occured..
+            %% DETECT IMPACT  -------------------------------------
             QREF = Q; 
             IMPACT = true; 
+            HOLD.TO = TO; 
             HOLD.Q = QREF; 
             IMPACTDETECTED = 1; % to avoid race conditions
             
         else
             
-            % Track FPE point with swing leg inverse kinematics
+            %% PRE IMPACT  -----------------------------------------------
             QREF = LAST.QREF;
+            
+            
+            % SWING LEG  
             
             % Orientation Compensation
             % .. Keeps swing foot sagittal plane aligned with stance foot 
@@ -104,20 +118,33 @@ function QREF = IKController(BIPED, STATE, XREF, X)
             
             % Lock ANKLEYAW joint
             QREF(5) = 0; 
+            
+            
+            % STAND LEG 
+            QREF(8:14) = Q(8:14); 
 
         end
         
     else
+        
+        %% DURING IMPACT  -------------------------------------
+        IMPACTCLOCK = min(IMPACTCLOCK+1, UPDATEINTERVAL); 
+        
         % Hold joint values until contact forces stabilize. 
         QREF = HOLD.Q;
         
         % @TODO: Update at regular intervals? 
+        if (IMPACTCLOCK == UPDATEINTERVAL) 
+            IMPACTCLOCK = 0; 
+            %HOLD.Q(8:14) = Q(8:14); 
+        end
+        
     end
     
     % -------------------------------------------------------------
     
-    if (STEP == BREAKPOINT)
-        STEP = 0; 
+    if (DEBUGSTEP == BREAKPOINT)
+        DEBUGSTEP = 0; 
     end
     
     LAST.QREF = QREF; 

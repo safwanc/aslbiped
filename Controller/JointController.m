@@ -2,9 +2,12 @@ function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
 %#codegen
 
     global IMPACT
-    persistent LAST TIMER MAX
+    persistent LAST IMPACTCLOCK IMPACTINTERVAL IMPACTDETECTED
     persistent HIPZ HIPX HIPY KNEEY ANKLEZ ANKLEY ANKLEX
 	persistent QL QR ALL PITCH FOOT
+    
+    SWINGFOOT = LP; 
+    % @TODO: Remove LP
     
 	Kp = repmat(KP, 14, 1); 
     Kd = repmat(KD, 14, 1); 
@@ -26,12 +29,16 @@ function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
             ); 
     end
     
-    if isempty(MAX)
-        MAX = 5000; 
+    if isempty(IMPACTINTERVAL)
+        IMPACTINTERVAL = 5000; 
     end
     
-    if isempty(TIMER)
-        TIMER = 0; 
+    if isempty(IMPACTCLOCK)
+        IMPACTCLOCK = 0; 
+    end
+    
+    if isempty(IMPACTDETECTED)
+        IMPACTDETECTED = 0; 
     end
 
     if isempty(QL)
@@ -114,61 +121,61 @@ function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
                 Kp(SWING) = 500;
                 Kd(SWING) = 10; 
                 
-                Kp(STAND) = 300;
+                Kp(STAND) = 100;
                 Kd(STAND) = 10; 
-                
-%                 Kp(STAND(HIPX)) = 50; 
-%                 Kd(STAND(HIPX)) = 5; 
                 
                 Kp(STAND(FOOT)) = 0; 
                 Kd(STAND(FOOT)) = 0;
 
-                if (~IMPACT && (LP(3) < 0.01))
-                    Kp(SWING([ANKLEX ANKLEY KNEEY])) = 0; 
-                    Kd(SWING([ANKLEX ANKLEY KNEEY])) = 0;
+                if (~IMPACT && ~IMPACTDETECTED)
                     
-                    Kp(SWING(FOOT)) = 0; 
-                    Kd(SWING(FOOT)) = 0;
-                end
-
-                if IMPACT
-                    
-                    if LAST.IMPACT ~= IMPACT
-                        % Heel Strike
-                        TIMER = 0; 
+                    %% PRE IMPACT  ----------------------------------------
+                    if (SWINGFOOT(end) <= 0.03)
+                        Kp(SWING(KNEEY)) = 0;
+                        Kd(SWING(KNEEY)) = 0;
+                        
+%                         Kp(SWING(FOOT)) = 0;
+%                         Kd(SWING(FOOT)) = 0;
                     end
-
-                    TIMER = min(TIMER+1, MAX); 
                     
-                    if (TIMER < MAX)
+                elseif (IMPACT && ~IMPACTDETECTED)
+                    
+                    %% DETECT IMPACT  -------------------------------------
+                    IMPACTDETECTED = 1;
+                    IMPACTCLOCK = 0;
+                    
+                else
+                    
+                    %% DURING IMPACT  -------------------------------------
+                    IMPACTCLOCK = min(IMPACTCLOCK+1, IMPACTINTERVAL); 
+                    if (IMPACTCLOCK < IMPACTINTERVAL)
                         
                         % Control action to absorb large forces and hold
                         % current joint angles for a predefined period of
                         % time. 
                         
-                        Kp(SWING) = 400; 
-                        Kd(SWING) = 10;
+                        Kp(SWING) = KP; 
+                        Kd(SWING) = 12;
                         
-                        Kp(STAND) = 3000; 
-                        Kd(STAND) = 10;
+                        Kp(STAND) = KP; 
+                        Kd(STAND) = 12;
                         
-%                         Kp(SWING(PITCH)) = 400; 
-%                         Kd(SWING(PITCH)) = 10;
+                        %Kp(SWING(PITCH)) = 500; 
+                        %Kd(SWING(PITCH)) = 10;
 %                     
-%                         Kp(STAND(PITCH)) = 100; 
+%                         Kp(STAND(PITCH)) = 50; 
 %                         Kd(STAND(PITCH)) = 10;
 %                         
-                        Kp(SWING([ANKLEX ANKLEY KNEEY])) = 100; 
-                        Kd(SWING([ANKLEX ANKLEY KNEEY])) = 10;
-                        
-                        Kp(STAND([ANKLEX ANKLEY KNEEY])) = 100; 
-                        Kd(STAND([ANKLEX ANKLEY KNEEY])) = 10;
+%                         Kp(SWING([ANKLEX ANKLEY KNEEY])) = 100; 
+%                         Kd(SWING([ANKLEX ANKLEY KNEEY])) = 10;
+%                         
+%                         Kp(STAND([ANKLEX ANKLEY KNEEY])) = 100; 
+%                         Kd(STAND([ANKLEX ANKLEY KNEEY])) = 10;
                     else
-                        % Revert to normal control action 
-                        IMPACT = false; 
-                        TIMER = 0; 
+                        
+                        %% POST IMPACT  -----------------------------------
+                        IMPACT = false;
                     end
-
                 end
                 
             otherwise
