@@ -2,14 +2,16 @@ function QREF = IKController(BIPED, STATE, XREF, X)
 %#codegen
 
     global IMPACT
-    persistent HOLD LAST STEP BREAKPOINT OFFSET
-
+    persistent HOLD LAST STEP BREAKPOINT FPEOFFSET IMPACTDETECTED
+    
     TO = X(4:6); 
     Q  = X(7:20); 
     FPEX = XREF(1); 
     
     % -------------------------------------------------------------
-
+    % MAIN FUNCTION
+    % -------------------------------------------------------------
+    
     if isempty(HOLD)
         HOLD = struct('TO', TO, 'Q', Q); 
     end
@@ -18,12 +20,25 @@ function QREF = IKController(BIPED, STATE, XREF, X)
         LAST = struct('TO', HOLD.TO, 'QREF', HOLD.Q); 
     end
     
-    if isempty(OFFSET)
+    if isempty(FPEOFFSET)
         OFFSET = struct(...
-            'STAND',    0.035,  ...
+            'STAND',    0.100,  ...
             'WALK',     0.000,  ...
             'NONE',     0.000   ...
             ); 
+        
+            %{
+            switch(MODE)
+                case FPEMode.Stand
+                    FPEOFFSET = OFFSET.STAND;
+                case FPEMode.Walk
+                    FPEOFFSET = OFFSET.STAND;
+                otherwise
+                    FPEOFFSET = OFFSET.STAND;
+            end
+            %} 
+            % @TODO: Remove hard coded offset once MODE is an input
+            FPEOFFSET = OFFSET.STAND;
     end
     
     if isempty(STEP)
@@ -34,59 +49,71 @@ function QREF = IKController(BIPED, STATE, XREF, X)
         BREAKPOINT = 30; 
     end
     
+    if isempty(IMPACTDETECTED)
+        IMPACTDETECTED = 0; 
+    end
+    
     STEP = min(STEP+1, BREAKPOINT);
     
     % -------------------------------------------------------------
-    % MAIN FUNCTION
-    % -------------------------------------------------------------
-    
-	QREF = LAST.QREF; 
-    
-    QREF([1 5]) = 0; 
-    QREF([8 12]) = 0;
-    
-    QREF(13) = Q(13); 
-    QREF(14) = Q(14);
-    
+    % STATE/MODE DEPENDENT
     % -------------------------------------------------------------
     
     switch(STATE)
         case FPEState.LeftDrop
-            SWINGLEG = BIPED.L; 
+            SWINGLEG = BIPED.L;
+            STANDLEG = BIPED.R;
         case FPEState.RightDrop
-            SWINGLEG = BIPED.R; 
+            SWINGLEG = BIPED.R;
+            STANDLEG = BIPED.L;
         otherwise
-            error('Unsupported State for IK Controller'); 
+            error('Unsupported STATE for IK Controller');
     end
     
-    
-    FPEOFFSET = OFFSET.STAND;
-    %{
-    switch(MODE)
-        case FPEMode.Stand
-            FPEOFFSET = OFFSET.STAND; 
-        case FPEMode.Walk
-            FPEOFFSET = OFFSET.STAND; 
-        otherwise
-            FPEOFFSET = OFFSET.STAND; 
-    end
-    %}
-
-    % FPE Tracking Kinematics: 
-    [QREF(3), QREF(4)] = TrackPhi(BIPED.TW0, SWINGLEG, FPEX, FPEOFFSET);
-    QREF(6) = - QREF(3) - QREF(4); 
-    
+	% -------------------------------------------------------------
+    % MAIN FUNCTION
     % -------------------------------------------------------------
+    
+    
+    if ~IMPACTDETECTED
+        if GroundContact(SWINGLEG)
+            
+            % Check if an impact occured..
+            QREF = Q; 
+            IMPACT = true; 
+            HOLD.Q = QREF; 
+            IMPACTDETECTED = 1; % to avoid race conditions
+            
+        else
+            
+            % Track FPE point with swing leg inverse kinematics
+            QREF = LAST.QREF;
+            
+            % Orientation Compensation
+            % .. Keeps swing foot sagittal plane aligned with stance foot 
+            % .. while FPE is being tracked.
+            
+            [TORSOROLL, TORSOPITCH, TORSOYAW] = TorsoOrientation(STANDLEG);
+            QREF(1) = -TORSOYAW; 
+            QREF(2) = -TORSOROLL/2;
+            QREF(7) = -TORSOROLL/2; 
+            
+            % FPE Tracking Kinematics (Sagittal Plane)
+            [QREF(3), QREF(4)] = TrackPhi(BIPED.TW0, SWINGLEG, FPEX, FPEOFFSET);
+            QREF(6) = - QREF(3) - QREF(4);
+            
+            % Lock ANKLEYAW joint
+            QREF(5) = 0; 
 
-	 p = TO(2) - LAST.TO(2);
-     r = TO(1) - LAST.TO(1);
-
-     QREF(3) = QREF(3) + p; 
-     QREF(6) = QREF(6) + p; 
-     
-     QREF(2) = QREF(2) - r; 
-     QREF(7) = QREF(7) - r;
-     
+        end
+        
+    else
+        % Hold joint values until contact forces stabilize. 
+        QREF = HOLD.Q;
+        
+        % @TODO: Update at regular intervals? 
+    end
+    
     % -------------------------------------------------------------
     
     if (STEP == BREAKPOINT)
@@ -96,6 +123,17 @@ function QREF = IKController(BIPED, STATE, XREF, X)
     LAST.QREF = QREF; 
     LAST.TO = TO; 
 
+end
+
+function [TORSOROLL, TORSOPITCH, TORSOYAW] = TorsoOrientation(STANDLEG)
+
+    R0F = STANDLEG.T0N(1:3,1:3,end); 
+    TF = GetRPY(R0F'); 
+    
+    TORSOROLL   = TF(1); 
+    TORSOPITCH  = TF(2); 
+    TORSOYAW    = TF(3); 
+    
 end
 
 function [QHIP, QKNEE] = TrackPhi(TW0, SWINGLEG, FPEX, OFFSET)
@@ -139,8 +177,20 @@ function [QHip, QKnee] = LegIK(P, LThigh, LShank)
 
 end
 
+function [ c ] = GroundContact(LEG)
 
+    persistent GNDTOL 
+    if isempty(GNDTOL)
+        GNDTOL = -0.001; 
+    end
 
+    c = 0; 
+    
+    if all(LEG.FOOT.CP(3,:) < GNDTOL)
+        c = 1; 
+    end
+
+end
 
 function [LThigh, LShank, LAnkle] = LegLengths(LEG)
 
@@ -158,5 +208,19 @@ function [ P0 ] = Transform(T0W, PW)
 
     P = T0W * [PW; 1]; 
     P0 = P(1:3); 
+    
+end
+
+function [ RPY ] = GetRPY(R)
+
+    if ((R(1,1) == 0) || R(3,3) == 0)
+        error('Degenerate Case'); 
+    end
+
+    Roll    = atan2(R(3,2), R(3,3)); 
+    Pitch   = atan2(-R(3,1), hypot(R(3,2), R(3,3))); 
+    Yaw     = atan2(R(2,1), R(1,1)); 
+    
+    RPY = [Roll; Pitch; Yaw]; 
     
 end
