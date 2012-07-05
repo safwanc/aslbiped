@@ -21,12 +21,13 @@ function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
     
     if isempty(LAST)
         LAST = struct( ...
-            'STATE', STATE ...
+            'STATE', STATE, ...
+            'IMPACT', IMPACT ...
             ); 
     end
     
     if isempty(MAX)
-        MAX = 1000; 
+        MAX = 5000; 
     end
     
     if isempty(TIMER)
@@ -60,11 +61,23 @@ function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
     SWING = QL; 
     STAND = QR; 
     
-    if (MODE ~= FPEMode.Init)
+    if (STATE ~= FPEState.StandStill)
         switch(STATE)
-                    
-            case {FPEState.LeftLift, FPEState.LeftSwing}
 
+            case FPEState.LeftPush
+%                                             | ___ \| | | |/  ___|| | | |
+%                                             | |_/ /| | | |\ `--. | |_| |
+%                                             |  __/ | | | | `--. \|  _  |
+%                                             | |    | |_| |/\__/ /| | | |
+%                                             \_|     \___/ \____/ \_| |_/
+
+
+            case FPEState.LeftLift
+%                                              | |   |_   _||  ___||_   _|
+%                                              | |     | |  | |_     | |  
+%                                              | |     | |  |  _|    | |  
+%                                              | |_____| |_ | |      | |  
+%                                              \_____/\___/ \_|      \_/ 
                 Kp(SWING) = 500; 
                 Kd(SWING) = 10;
                 
@@ -73,24 +86,55 @@ function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
                 
                 Kp(STAND(FOOT)) = 2000; 
                 Kd(STAND(FOOT)) = 10;
-               
+
+            case FPEState.LeftSwing
+%                                     /  ___|| |  | ||_   _|| \ | ||  __ \
+%                                     \ `--. | |  | |  | |  |  \| || |  \/
+%                                      `--. \| |/\| |  | |  | . ` || | __ 
+%                                     /\__/ /\  /\  / _| |_ | |\  || |_\ \
+%                                     \____/  \/  \/  \___/ \_| \_/ \____/
+                Kp(SWING) = 500; 
+                Kd(SWING) = 10;
+                
+                Kp(STAND) = 1200; 
+                Kd(STAND) = 10; 
+                
+                Kp(STAND(FOOT)) = 2000; 
+                Kd(STAND(FOOT)) = 10;
+                
             case FPEState.LeftDrop
+                
+%                                             |  _  \| ___ \|  _  || ___ \
+%                                             | | | || |_/ /| | | || |_/ /
+%                                             | | | ||    / | | | ||  __/ 
+%                                             | |/ / | |\ \ \ \_/ /| |    
+%                                             |___/  \_| \_| \___/ \_|    
+%                                                                         
+%     
                 Kp(SWING) = 500;
                 Kd(SWING) = 10; 
-
+                
+                Kp(STAND) = 300;
+                Kd(STAND) = 10; 
+                
+%                 Kp(STAND(HIPX)) = 50; 
+%                 Kd(STAND(HIPX)) = 5; 
+                
                 Kp(STAND(FOOT)) = 0; 
                 Kd(STAND(FOOT)) = 0;
 
-                if ((LP(3) < 0.01) || IMPACT)
-                    Kp(SWING([KNEEY])) = 100; 
-                    Kd(SWING([KNEEY])) = 2;
-                    IMPACT = true; 
+                if (~IMPACT && (LP(3) < 0.01))
+                    Kp(SWING([ANKLEX ANKLEY KNEEY])) = 0; 
+                    Kd(SWING([ANKLEX ANKLEY KNEEY])) = 0;
+                    
+                    Kp(SWING(FOOT)) = 0; 
+                    Kd(SWING(FOOT)) = 0;
                 end
 
-            case FPEState.StandStill
                 if IMPACT
                     
-                    if LAST.STATE ~= STATE
+                    if LAST.IMPACT ~= IMPACT
+                        % Heel Strike
                         TIMER = 0; 
                     end
 
@@ -98,23 +142,37 @@ function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
                     
                     if (TIMER < MAX)
                         
-                        Kp(ALL) = 500; 
-                        Kd(ALL) = 10;
+                        % Control action to absorb large forces and hold
+                        % current joint angles for a predefined period of
+                        % time. 
                         
-                        Kp(SWING(PITCH)) = 80; 
-                        Kd(SWING(PITCH)) = 5;
-                    
-                        Kp(STAND(FOOT)) = 80; 
-                        Kd(STAND(FOOT)) = 5;
+                        Kp(SWING) = 400; 
+                        Kd(SWING) = 10;
+                        
+                        Kp(STAND) = 3000; 
+                        Kd(STAND) = 10;
+                        
+%                         Kp(SWING(PITCH)) = 400; 
+%                         Kd(SWING(PITCH)) = 10;
+%                     
+%                         Kp(STAND(PITCH)) = 100; 
+%                         Kd(STAND(PITCH)) = 10;
+%                         
+                        Kp(SWING([ANKLEX ANKLEY KNEEY])) = 100; 
+                        Kd(SWING([ANKLEX ANKLEY KNEEY])) = 10;
+                        
+                        Kp(STAND([ANKLEX ANKLEY KNEEY])) = 100; 
+                        Kd(STAND([ANKLEX ANKLEY KNEEY])) = 10;
                     else
-                        
+                        % Revert to normal control action 
                         IMPACT = false; 
                         TIMER = 0; 
-                        
                     end
 
                 end
-
+                
+            otherwise
+                error('Unsupported STATE for Joint Controller');
         end
     end
        
@@ -124,5 +182,6 @@ function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
     K = [Kp'; Kd']; 
     
 	LAST.STATE = STATE; 
+    LAST.IMPACT = IMPACT; 
     
 end
