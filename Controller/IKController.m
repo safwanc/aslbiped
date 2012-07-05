@@ -1,45 +1,64 @@
-function QREF = IKController(BIPED, STATE, XREF, X)
+function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
 %#codegen
 
     global IMPACT
-    persistent HOLD LAST DEBUGSTEP BREAKPOINT FPEOFFSET 
-    persistent IMPACTDETECTED IMPACTCLOCK UPDATEINTERVAL
+    persistent LAST IMPACTCLOCK IMPACTINTERVAL IMPACTDETECTED
+    persistent HIPZ HIPX HIPY KNEEY ANKLEZ ANKLEY ANKLEX
+	persistent QL QR ALL PITCH FOOT DEBUGSTEP BREAKPOINT
     
-    TO = X(4:6); 
-    Q  = X(7:20); 
-    FPEX = XREF(1); 
+    SWINGFOOT = LP; 
+    % @TODO: Remove LP
+    
+	Kp = repmat(KP, 14, 1); 
+    Kd = repmat(KD, 14, 1); 
     
     % -------------------------------------------------------------
-    % MAIN FUNCTION
-    % -------------------------------------------------------------
-    
-    if isempty(HOLD)
-        HOLD = struct('TO', TO, 'Q', Q); 
-    end
+
+    if isempty(HIPZ)	 HIPZ    = 	1; end
+    if isempty(HIPX)	 HIPX    = 	2; end
+    if isempty(HIPY)	 HIPY    = 	3; end
+    if isempty(KNEEY)	 KNEEY   = 	4; end
+    if isempty(ANKLEZ) 	 ANKLEZ  = 	5; end
+    if isempty(ANKLEY) 	 ANKLEY  = 	6; end
+    if isempty(ANKLEX) 	 ANKLEX  = 	7; end
     
     if isempty(LAST)
-        LAST = struct('TO', HOLD.TO, 'QREF', HOLD.Q); 
+        LAST = struct( ...
+            'STATE', STATE, ...
+            'IMPACT', IMPACT ...
+            ); 
     end
     
-    if isempty(FPEOFFSET)
-        OFFSET = struct(...
-            'STAND',    0.135,  ...
-            'WALK',     0.130,  ...
-            'NONE',     0.000   ...
-            ); 
-        
-            %{
-            switch(MODE)
-                case FPEMode.Stand
-                    FPEOFFSET = OFFSET.STAND;
-                case FPEMode.Walk
-                    FPEOFFSET = OFFSET.STAND;
-                otherwise
-                    FPEOFFSET = OFFSET.STAND;
-            end
-            %} 
-            % @TODO: Remove hard coded offset once MODE is an input
-            FPEOFFSET = OFFSET.STAND;
+    if isempty(IMPACTINTERVAL)
+        IMPACTINTERVAL = 2000; 
+    end
+    
+    if isempty(IMPACTCLOCK)
+        IMPACTCLOCK = 0; 
+    end
+    
+    if isempty(IMPACTDETECTED)
+        IMPACTDETECTED = 0; 
+    end
+
+    if isempty(QL)
+        QL = 1:7; 
+    end
+    
+    if isempty(QR)
+        QR = 8:14; 
+    end
+    
+    if isempty(ALL)
+        ALL = [QL QR]; 
+    end
+    
+    if isempty(PITCH)
+        PITCH = [HIPY KNEEY ANKLEY]; 
+    end
+    
+    if isempty(FOOT)
+        FOOT = [ANKLEY ANKLEX]; 
     end
     
     if isempty(DEBUGSTEP)
@@ -49,225 +68,153 @@ function QREF = IKController(BIPED, STATE, XREF, X)
     if isempty(BREAKPOINT)
         BREAKPOINT = 30; 
     end
-    
-    if isempty(IMPACTDETECTED)
-        IMPACTDETECTED = 0; 
-    end
-    
-    if isempty(UPDATEINTERVAL)
-        UPDATEINTERVAL = 500; 
-    end
-    
-    if isempty(IMPACTCLOCK)
-        IMPACTCLOCK = 0; 
-    end
-    
-    DEBUGSTEP = min(DEBUGSTEP+1, BREAKPOINT);
-    
+
     % -------------------------------------------------------------
-    % STATE/MODE DEPENDENT
-    % -------------------------------------------------------------
-    
-    switch(STATE)
-        case FPEState.LeftDrop
-            SWINGLEG = BIPED.L;
-            STANDLEG = BIPED.R;
-        case FPEState.RightDrop
-            SWINGLEG = BIPED.R;
-            STANDLEG = BIPED.L;
-        otherwise
-            error('Unsupported STATE for IK Controller');
-    end
-    
-	% -------------------------------------------------------------
     % MAIN FUNCTION
     % -------------------------------------------------------------
     
+    SWING = QL; 
+    STAND = QR; 
     
-    if ~IMPACTDETECTED
-        
-        if GroundContact(SWINGLEG)
-            
-            %% DETECT IMPACT  -------------------------------------
-            QREF = Q; 
-            IMPACT = true; 
-            HOLD.TO = TO; 
-            HOLD.Q = QREF; 
-            IMPACTDETECTED = 1; % to avoid race conditions
-            
-            % @EXPERIMENT: Fix Torso Orientation: 
-            % HOLD.Q = FixOrientation(TO, Q); 
-            
-        else
-            
-            %% PRE IMPACT  -----------------------------------------------
-            QREF = LAST.QREF;
-            
-            
-            % SWING LEG  
-            
-            % Orientation Compensation
-            % .. Keeps swing foot sagittal plane aligned with stance foot 
-            % .. while FPE is being tracked.
-            
-            [TORSOROLL, TORSOPITCH, TORSOYAW] = TorsoOrientation(STANDLEG);
-            QREF(1) = -TORSOYAW; 
-            QREF(2) = -TORSOROLL/2;
-            QREF(7) = -TORSOROLL/2; 
-            
-            % FPE Tracking Kinematics (Sagittal Plane)
-            [QREF(3), QREF(4)] = TrackPhi(BIPED.TW0, SWINGLEG, FPEX, FPEOFFSET);
-            QREF(6) = - QREF(3) - QREF(4);
-            
-            % Lock ANKLEYAW joint
-            QREF(5) = 0; 
-            
-            
-            % STAND LEG 
-            QREF(8:14) = Q(8:14); 
+    if (STATE ~= FPEState.StandStill)
+        switch(STATE)
 
+            case FPEState.LeftPush
+%                                             | ___ \| | | |/  ___|| | | |
+%                                             | |_/ /| | | |\ `--. | |_| |
+%                                             |  __/ | | | | `--. \|  _  |
+%                                             | |    | |_| |/\__/ /| | | |
+%                                             \_|     \___/ \____/ \_| |_/
+
+
+            case FPEState.LeftLift
+%                                              | |   |_   _||  ___||_   _|
+%                                              | |     | |  | |_     | |  
+%                                              | |     | |  |  _|    | |  
+%                                              | |_____| |_ | |      | |  
+%                                              \_____/\___/ \_|      \_/ 
+                Kp(SWING) = 500; 
+                Kd(SWING) = 10;
+                
+                Kp(STAND) = 1200; 
+                Kd(STAND) = 10; 
+                
+                Kp(STAND(FOOT)) = 2000; 
+                Kd(STAND(FOOT)) = 10;
+
+            case FPEState.LeftSwing
+%                                     /  ___|| |  | ||_   _|| \ | ||  __ \
+%                                     \ `--. | |  | |  | |  |  \| || |  \/
+%                                      `--. \| |/\| |  | |  | . ` || | __ 
+%                                     /\__/ /\  /\  / _| |_ | |\  || |_\ \
+%                                     \____/  \/  \/  \___/ \_| \_/ \____/
+                Kp(SWING) = 500; 
+                Kd(SWING) = 10;
+                
+                Kp(STAND) = 1200; 
+                Kd(STAND) = 10; 
+                
+                Kp(STAND(FOOT)) = 2000; 
+                Kd(STAND(FOOT)) = 10;
+                
+            case FPEState.LeftDrop
+                
+%                                             |  _  \| ___ \|  _  || ___ \
+%                                             | | | || |_/ /| | | || |_/ /
+%                                             | | | ||    / | | | ||  __/ 
+%                                             | |/ / | |\ \ \ \_/ /| |    
+%                                             |___/  \_| \_| \___/ \_|    
+%                                                                         
+%     
+                Kp(SWING) = 500;
+                Kd(SWING) = 10; 
+                
+                Kp(STAND) = 500;
+                Kd(STAND) = 10; 
+                
+                Kp(STAND(FOOT)) = 0; 
+                Kd(STAND(FOOT)) = 0;
+
+                if (~IMPACT && ~IMPACTDETECTED)
+                    
+                    %% PRE IMPACT  ----------------------------------------
+                    if (SWINGFOOT(end) <= 0.03)
+%                         Kp(SWING(PITCH)) = 50;
+%                         Kd(SWING(PITCH)) = 2;
+%                         Kp(SWING([HIPX ANKLEX])) = 0;
+%                         Kd(SWING([HIPX ANKLEX])) = 0;
+                        
+%                         Kp(SWING) = 50;
+%                         Kd(SWING) = 2; 
+%                         
+%                         Kp(STAND) = 50;
+%                         Kd(STAND) = 2; 
+                        
+%                         Kp(SWING(FOOT)) = 0;
+%                         Kd(SWING(FOOT)) = 0;
+%                         
+%                         Kp(STAND(FOOT)) = 0;
+%                         Kd(STAND(FOOT)) = 0;
+                    end
+                    
+                elseif (IMPACT && ~IMPACTDETECTED)
+                    
+                    %% DETECT IMPACT  -------------------------------------
+                    IMPACTDETECTED = 1;
+                    IMPACTCLOCK = 0;
+                    
+                else
+                    
+                    %% DURING IMPACT  -------------------------------------
+                    IMPACTCLOCK = min(IMPACTCLOCK+1, IMPACTINTERVAL); 
+                    if (IMPACTCLOCK < IMPACTINTERVAL)
+                        
+                        % Control action to absorb large forces and hold
+                        % current joint angles for a predefined period of
+                        % time. 
+                        
+                        Kp(SWING) = 1000; 
+                        Kd(SWING) = 10;
+                        
+                        Kp(STAND) = 1000; 
+                        Kd(STAND) = 10;
+                        
+                        %Kp(SWING(PITCH)) = 500; 
+                        %Kd(SWING(PITCH)) = 10;
+%                     
+%                         Kp(STAND(PITCH)) = 50; 
+%                         Kd(STAND(PITCH)) = 10;
+%                         
+%                         Kp(SWING([ANKLEX ANKLEY KNEEY])) = 100; 
+%                         Kd(SWING([ANKLEX ANKLEY KNEEY])) = 10;
+%                         
+%                         Kp(STAND([ANKLEX ANKLEY KNEEY])) = 100; 
+%                         Kd(STAND([ANKLEX ANKLEY KNEEY])) = 10;
+
+                        DEBUGSTEP = min(DEBUGSTEP+1, BREAKPOINT);
+
+                        if (DEBUGSTEP == BREAKPOINT)
+                            DEBUGSTEP = 0; 
+                        end
+
+                    else
+                        
+                        %% POST IMPACT  -----------------------------------
+                        IMPACT = false;
+                    end
+                end
+                
+            otherwise
+                error('Unsupported STATE for Joint Controller');
         end
-        
-    else
-        
-        %% DURING IMPACT  -------------------------------------
-        IMPACTCLOCK = min(IMPACTCLOCK+1, UPDATEINTERVAL); 
-        
-        % Hold joint values until contact forces stabilize. 
-        QREF = HOLD.Q;
-        
-        % @EXPERIMENT: Update at regular intervals? 
-        if (IMPACTCLOCK == UPDATEINTERVAL) 
-            IMPACTCLOCK = 0; 
-            %HOLD.Q(8:14) = Q(8:14); 
-        end
-        
     end
-    
+       
     % -------------------------------------------------------------
     
-    if (DEBUGSTEP == BREAKPOINT)
-        DEBUGSTEP = 0; 
-    end
+    U = (Kp.*QE) + (Kd.*DQE);
+    K = [Kp'; Kd']; 
     
-    LAST.QREF = QREF; 
-    LAST.TO = TO; 
-
-end
-
-function [TORSOROLL, TORSOPITCH, TORSOYAW] = TorsoOrientation(STANDLEG)
-
-    R0F = STANDLEG.T0N(1:3,1:3,end); 
-    TF = GetRPY(R0F'); 
-    
-    TORSOROLL   = TF(1); 
-    TORSOPITCH  = TF(2); 
-    TORSOYAW    = TF(3); 
-    
-end
-
-function [ QREF ] = FixOrientation(TO, Q)
-    % @UNFINISHED
-    R = TO(1); 
-    P = TO(2); 
-    Y = TO(3); 
-    
-    QREF = Q; 
-    
-    QREF(2) = QREF(2) + R; 
-    %QREF(7) = QREF(7) - R; 
-    
-    QREF(9) = QREF(9) - R; 
-    %QREF(14) = QREF(14) + R; 
-    
-
-end
-
-function [QHIP, QKNEE] = TrackPhi(TW0, SWINGLEG, FPEX, OFFSET)
-     
-    % @TODO: Make a persistent struct for: 
-    [LThigh, LShank, LAnkle] = LegLengths(SWINGLEG);
-
-	HIPW = Transform(TW0, SWINGLEG.O(:,3)); 
-    SWINGHIP = [HIPW(1); HIPW(3)]; 
-    SWINGFOOT = [FPEX+OFFSET; SWINGLEG.FOOT.P(3)]; 
-    
-    [QHIP, QKNEE] = LegIK(SWINGHIP-SWINGFOOT, LThigh, LShank+LAnkle);
-
-end
-
-function [QHip, QKnee] = LegIK(P, LThigh, LShank)
-
-    X = P(1); 
-    Z = P(end); 
-
-    D = ((X^2) + (Z^2) - (LShank^2) - (LThigh^2)) / (2*LShank*LThigh); 
-    
-    if (D > 1) 
-        % This case occurs when the target is out of the workspace reach
-        QKnee = 0; 
-        
-    else
-        QKnee = atan2(sqrt(1-(D^2)), D);
-        
-        if (QKnee < 0)  
-            % Always pick the +ve knee angle solution. 
-            QKnee = atan2(-sqrt(1-(D^2)), D);
-        end
-    end
-    
-    
-    QHip = atan(X/Z) - atan( ...
-        (LShank * sin(QKnee)) / ...
-        (LThigh + LShank*cos(QKnee)) ...
-        );
-
-end
-
-function [ c ] = GroundContact(LEG)
-
-    persistent GNDTOL 
-    if isempty(GNDTOL)
-        GNDTOL = -0.001; 
-    end
-
-    c = 0; 
-    
-    if all(LEG.FOOT.CP(3,:) < GNDTOL)
-        c = 1; 
-    end
-
-end
-
-function [LThigh, LShank, LAnkle] = LegLengths(LEG)
-
-    OHip = LEG.O(:,3); 
-    OKnee = LEG.O(:,4); 
-    OAnkle = LEG.O(:,6); 
-
-    LThigh = norm(OHip-OKnee,2); 
-    LShank = norm(OKnee-OAnkle,2); 
-    LAnkle = 0.06480;
-    
-end
-
-function [ P0 ] = Transform(T0W, PW)
-
-    P = T0W * [PW; 1]; 
-    P0 = P(1:3); 
-    
-end
-
-function [ RPY ] = GetRPY(R)
-
-    if ((R(1,1) == 0) || R(3,3) == 0)
-        error('Degenerate Case'); 
-    end
-
-    Roll    = atan2(R(3,2), R(3,3)); 
-    Pitch   = atan2(-R(3,1), hypot(R(3,2), R(3,3))); 
-    Yaw     = atan2(R(2,1), R(1,1)); 
-    
-    RPY = [Roll; Pitch; Yaw]; 
+	LAST.STATE = STATE; 
+    LAST.IMPACT = IMPACT; 
     
 end
