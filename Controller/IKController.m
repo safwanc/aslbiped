@@ -91,14 +91,17 @@ function QREF = IKController(BIPED, STATE, XREF, X)
         if GroundContact(SWINGLEG)
             
             %% DETECT IMPACT  -------------------------------------
-            QREF = Q; 
+            
             IMPACT = true; 
-            HOLD.TO = TO; 
-            HOLD.Q = QREF; 
             IMPACTDETECTED = 1; % to avoid race conditions
             
+            HOLD.Q = Q;
+            HOLD.TO = TO; 
+            
             % @EXPERIMENT: Fix Torso Orientation: 
-            % HOLD.Q = FixOrientation(TO, Q); 
+            %HOLD.Q = FixOrientation(TO, Q); 
+            
+            QREF = HOLD.Q;
             
         else
             
@@ -130,8 +133,13 @@ function QREF = IKController(BIPED, STATE, XREF, X)
         %% DURING IMPACT  -------------------------------------
         IMPACTCLOCK = min(IMPACTCLOCK+1, UPDATEINTERVAL); 
         
+        HOLD.Q = Q; 
+        % @EXPERIMENT: Fix Torso Orientation:
+        %HOLD.Q = FixOrientation(TO, Q);
         % Hold joint values until contact forces stabilize. 
         QREF = HOLD.Q;
+        
+        
         
         % @EXPERIMENT: Update at regular intervals? 
         if (IMPACTCLOCK == UPDATEINTERVAL) 
@@ -165,11 +173,15 @@ end
 
 function [ QREF ] = FixOrientation(TO, Q)
     % @UNFINISHED
-    R = TO(1); 
+    R = abs(TO(1)); 
     P = TO(2); 
     Y = TO(3); 
     
     QREF = Q; 
+    QREF(2) = QREF(2) - R; 
+    QREF(7) = QREF(7) + R; 
+    QREF(9) = QREF(9) + R; 
+    QREF(14) = QREF(9) - R; 
     
 %     QREF(2) = QREF(2) + R; 
 %     QREF(7) = QREF(7) - R; 

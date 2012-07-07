@@ -4,7 +4,7 @@ function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
     global IMPACT
     persistent LAST IMPACTCLOCK IMPACTINTERVAL IMPACTDETECTED
     persistent HIPZ HIPX HIPY KNEEY ANKLEZ ANKLEY ANKLEX
-	persistent QL QR ALL PITCH FOOT DEBUGSTEP BREAKPOINT
+	persistent QL QR ALL ROLL PITCH FOOT DEBUGSTEP BREAKPOINT
     
     SWINGFOOT = LP; 
     % @TODO: Remove LP
@@ -30,7 +30,7 @@ function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
     end
     
     if isempty(IMPACTINTERVAL)
-        IMPACTINTERVAL = 2000; 
+        IMPACTINTERVAL = 3; 
     end
     
     if isempty(IMPACTCLOCK)
@@ -51,6 +51,10 @@ function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
     
     if isempty(ALL)
         ALL = [QL QR]; 
+    end
+    
+    if isempty(ROLL)
+        ROLL = [HIPX ANKLEX]; 
     end
     
     if isempty(PITCH)
@@ -75,7 +79,7 @@ function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
     
     SWING = QL; 
     STAND = QR; 
-    
+
     if (STATE ~= FPEState.StandStill)
         switch(STATE)
 
@@ -126,89 +130,95 @@ function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
 %                                             |___/  \_| \_| \___/ \_|    
 %                                                                         
 %     
-                Kp(SWING) = 500;
-                Kd(SWING) = 10; 
+                Kp(ALL) = KP;
+                Kd(ALL) = KD;
                 
-                Kp(STAND) = 500;
-                Kd(STAND) = 10; 
-                
-                Kp(STAND(FOOT)) = 0; 
-                Kd(STAND(FOOT)) = 0;
+                if ~IMPACTDETECTED
+                    Kp(SWING) = 500;
+                    Kd(SWING) = 10; 
 
-                if (~IMPACT && ~IMPACTDETECTED)
-                    
-                    %% PRE IMPACT  ----------------------------------------
-                    if (SWINGFOOT(end) <= 0.03)
-%                         Kp(SWING(PITCH)) = 50;
-%                         Kd(SWING(PITCH)) = 2;
-%                         Kp(SWING([HIPX ANKLEX])) = 0;
-%                         Kd(SWING([HIPX ANKLEX])) = 0;
-                        
-%                         Kp(SWING) = 50;
-%                         Kd(SWING) = 2; 
-%                         
-%                         Kp(STAND) = 50;
-%                         Kd(STAND) = 2; 
-                        
-%                         Kp(SWING(FOOT)) = 0;
-%                         Kd(SWING(FOOT)) = 0;
-%                         
-%                         Kp(STAND(FOOT)) = 0;
-%                         Kd(STAND(FOOT)) = 0;
-                    end
-                    
-                elseif (IMPACT && ~IMPACTDETECTED)
-                    
-                    %% DETECT IMPACT  -------------------------------------
-                    IMPACTDETECTED = 1;
-                    IMPACTCLOCK = 0;
-                    
-                else
-                    
-                    %% DURING IMPACT  -------------------------------------
-                    IMPACTCLOCK = min(IMPACTCLOCK+1, IMPACTINTERVAL); 
-                    if (IMPACTCLOCK < IMPACTINTERVAL)
-                        
-                        % Control action to absorb large forces and hold
-                        % current joint angles for a predefined period of
-                        % time. 
-                        
-                        Kp(SWING) = 1000; 
-                        Kd(SWING) = 10;
-                        
-                        Kp(STAND) = 1000; 
-                        Kd(STAND) = 10;
-                        
-                        %Kp(SWING(PITCH)) = 500; 
-                        %Kd(SWING(PITCH)) = 10;
-%                     
-%                         Kp(STAND(PITCH)) = 50; 
-%                         Kd(STAND(PITCH)) = 10;
-%                         
-%                         Kp(SWING([ANKLEX ANKLEY KNEEY])) = 100; 
-%                         Kd(SWING([ANKLEX ANKLEY KNEEY])) = 10;
-%                         
-%                         Kp(STAND([ANKLEX ANKLEY KNEEY])) = 100; 
-%                         Kd(STAND([ANKLEX ANKLEY KNEEY])) = 10;
+                    Kp(STAND) = 500 ;
+                    Kd(STAND) = 10; 
 
-                        DEBUGSTEP = min(DEBUGSTEP+1, BREAKPOINT);
-
-                        if (DEBUGSTEP == BREAKPOINT)
-                            DEBUGSTEP = 0; 
+                    Kp(STAND(FOOT)) = 0; 
+                    Kd(STAND(FOOT)) = 0;
+                    Kp(SWING(FOOT)) = 0;
+                    Kd(SWING(FOOT)) = 0;
+                    
+                    if ~IMPACT
+                        %% PRE IMPACT  ------------------------------------
+                        
+                        if (SWINGFOOT(end) <= 0.03)
+                            
+                            Kp(SWING(FOOT)) = 0;
+                            Kd(SWING(FOOT)) = 0;
+                            Kp(STAND(FOOT)) = 800; 
+                            Kd(STAND(FOOT)) = 10;
                         end
-
-                    else
                         
-                        %% POST IMPACT  -----------------------------------
-                        IMPACT = false;
+                    else
+                        %% DETECT IMPACT  ---------------------------------
+                        IMPACTDETECTED = 1;
+                        IMPACTCLOCK = 0;
+%                             Kp(ALL) = KP;
+%                             Kd(ALL) = KD;
+                        %{
+                        if IMPACTINTERVAL == 0
+                            Kp(ALL) = 3000;
+                            Kd(ALL) = 10;
+                            IMPACT = false;
+                        end
+                        %}
+                        
                     end
+                else
+                    if IMPACT
+                        %% DURING IMPACT  -------------------------------------
+                        IMPACTCLOCK = min(IMPACTCLOCK+1, IMPACTINTERVAL); 
+                        
+                        if (IMPACTCLOCK < IMPACTINTERVAL)
+                            
+                            % Control action to absorb large forces and hold
+                            % current joint angles for a predefined period of
+                            % time.
+                            
+                            Kp(SWING) = KP;
+                            Kd(SWING) = KD;
+                            
+                            Kp(STAND) = KP;
+                            Kd(STAND) = KD;
+                            
+                            DEBUGSTEP = min(DEBUGSTEP+1, BREAKPOINT);
+                            
+                            if (DEBUGSTEP == BREAKPOINT)
+                                DEBUGSTEP = 0;
+                            end
+                            
+                        else
+                            
+                            %% POST IMPACT  -------------------------------
+                            Kp(ALL) = KP;
+                            Kd(ALL) = KD;
+                            
+                            IMPACT = false;
+                        end
+                        
+                        
+                    end
+                    Kp %@HACK
                 end
-                
             otherwise
                 error('Unsupported STATE for Joint Controller');
         end
     end
        
+    
+    if ((LAST.STATE ~= STATE) && (IMPACTDETECTED))
+        if ((LAST.STATE == FPEState.LeftDrop) || (LAST.STATE == FPEState.RightDrop))
+            IMPACTDETECTED = 0; 
+        end
+    end
+    
     % -------------------------------------------------------------
     
     U = (Kp.*QE) + (Kd.*DQE);
@@ -216,5 +226,7 @@ function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
     
 	LAST.STATE = STATE; 
     LAST.IMPACT = IMPACT; 
+    
+    
     
 end
