@@ -11,6 +11,17 @@ function DQ = JacobianController(BIPED, STATE, DX)
             ); 
     end
 
+    
+    persistent DEBUGSTEP BREAKPOINT
+    if isempty(DEBUGSTEP)
+        DEBUGSTEP = 0;
+    end
+    
+    if isempty(BREAKPOINT)
+        BREAKPOINT = 30; 
+    end
+    
+    
     % Constant Variables (Optimization)
     persistent L R LR S JB I
     if isempty(L)   L = 1; end
@@ -20,6 +31,7 @@ function DQ = JacobianController(BIPED, STATE, DX)
     if isempty(S)   S = [eye(14) zeros(14, 6)]; end
     if isempty(JB) JB = [zeros(6,14) eye(6)];   end
     
+    DEBUGSTEP = min(DEBUGSTEP+1, BREAKPOINT);
     
     %% COMMON CALCULATIONS (STATE INDEPENDENT): 
     
@@ -46,12 +58,15 @@ function DQ = JacobianController(BIPED, STATE, DX)
             
              
             DXswing(3) = 4*DXswing(3);
-            %DXswing(4:6) = 4*DXswing(4:6);
+            %DXswing(4:6) = 1*DXswing(4:6);
             
             %% High Priority Tasks
             Jhigh   = Jcom_xy;
             DXhigh  = DXcom_xy;  
             [Jh, DXh] = Jconstraint(STAND, BIPED, Jhigh, DXhigh); 
+            
+            Jhdebug = Inverse(Jh);
+            Jhdebug(6,:) .* DXh'
             
             %% Low Priority Tasks
             Jl  = Jswing; 
@@ -59,7 +74,14 @@ function DQ = JacobianController(BIPED, STATE, DX)
             
             DQ(:,:) = S * Prioritized(Jh, DXh, Jl, DXl); 
             
+            % DEBUG
             
+            Jldebug = Inverse(Jl);
+            Jldebug(6,:) .* DXl'
+            
+            if (DEBUGSTEP == BREAKPOINT)
+                DEBUGSTEP = 0;
+            end
 
          case {FPEState.LeftSwing, FPEState.RightSwing}
             
@@ -105,7 +127,7 @@ function DQ = JacobianController(BIPED, STATE, DX)
             
             %% Low Priority Tasks
             Jl  = Jcom_z; 
-            DXl = DXcom_z;
+            DXl = DXcom_z; 
             
             DQ(:,:) = S * Prioritized(Jh, DXh, Jl, DXl); 
     end
