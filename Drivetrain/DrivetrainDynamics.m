@@ -206,8 +206,8 @@ end
 function [MOTOR] = ASLMotors
 
 	% Motor Parameters
-    [~, Km1, Kb1, R1, ~, Jm1, gr1] = Micromo3257
-    [~, Km2, Kb2, R2, ~, Jm2, gr2] = Micromo3242
+    [~, Km1, Kb1, R1, ~, Jm1, gr1] = Micromo3257;
+    [~, Km2, Kb2, R2, ~, Jm2, gr2] = Micromo3242;
     
     J1 = Jm1 * (gr1^2);     B1 = (gr1^2) * (Kb1*Km1/R1); 
     J2 = Jm2 * (gr2^2);     B2 = (gr2^2) * (Kb2*Km2/R2); 
