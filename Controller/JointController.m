@@ -1,18 +1,21 @@
 function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
 %#codegen
 
-    global IMPACT
-    persistent LAST IMPACTCLOCK IMPACTINTERVAL IMPACTDETECTED
+    Kp = repmat(KP, 14, 1); 
+    Kd = repmat(KD, 14, 1); 
+    
+    %persistent LAST IMPACTCLOCK IMPACTINTERVAL IMPACTDETECTED
     persistent HIPZ HIPX HIPY KNEEY ANKLEZ ANKLEY ANKLEX
 	persistent QL QR ALL ROLL PITCH FOOT DEBUGSTEP BREAKPOINT
     
-    SWINGFOOT = LP; 
-    % @TODO: Remove LP
-    
-	Kp = repmat(KP, 14, 1); 
-    Kd = repmat(KD, 14, 1); 
-    
-    % -------------------------------------------------------------
+    % Controller State Variables
+    persistent LAST IMPACT TIMER MAX KPT KDT MAXT
+    if isempty(LAST)
+        LAST = struct( ...
+            'STATE', STATE ...
+            ); 
+    end
+ % -------------------------------------------------------------
 
     if isempty(HIPZ)	 HIPZ    = 	1; end
     if isempty(HIPX)	 HIPX    = 	2; end
@@ -24,21 +27,8 @@ function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
     
     if isempty(LAST)
         LAST = struct( ...
-            'STATE', STATE, ...
-            'IMPACT', IMPACT ...
+            'STATE', STATE ...
             ); 
-    end
-    
-    if isempty(IMPACTINTERVAL)
-        IMPACTINTERVAL = 3; 
-    end
-    
-    if isempty(IMPACTCLOCK)
-        IMPACTCLOCK = 0; 
-    end
-    
-    if isempty(IMPACTDETECTED)
-        IMPACTDETECTED = 0; 
     end
 
     if isempty(QL)
@@ -72,161 +62,88 @@ function [U, K] = JointController(MODE, STATE, LP, RP, QE, DQE, KP, KD)
     if isempty(BREAKPOINT)
         BREAKPOINT = 30; 
     end
-
+    
+    if isempty(MAX)
+        MAX = 1000; 
+    end
+    
+    if isempty(TIMER)
+        TIMER = 0; 
+    end
+    
+    if isempty(IMPACT)
+        IMPACT = 0;
+    end
+    
+    if isempty(MAXT)
+        MAXT = 5000;
+    end
+    
+    if isempty(KPT)      KPT = SmoothTrajectory(KP, KP, MAXT); end
+    if isempty(KDT)      KDT = SmoothTrajectory(KD, KD, MAXT); end
+    
     % -------------------------------------------------------------
     % MAIN FUNCTION
     % -------------------------------------------------------------
     
-    SWING = QL; 
-    STAND = QR; 
-
-    if (STATE ~= FPEState.StandStill)
-        switch(STATE)
-
-            case FPEState.LeftPush
-%                                             | ___ \| | | |/  ___|| | | |
-%                                             | |_/ /| | | |\ `--. | |_| |
-%                                             |  __/ | | | | `--. \|  _  |
-%                                             | |    | |_| |/\__/ /| | | |
-%                                             \_|     \___/ \____/ \_| |_/
-
-
-            case FPEState.LeftLift
-%                                              | |   |_   _||  ___||_   _|
-%                                              | |     | |  | |_     | |  
-%                                              | |     | |  |  _|    | |  
-%                                              | |_____| |_ | |      | |  
-%                                              \_____/\___/ \_|      \_/ 
-                Kp(SWING) = 500; 
-                Kd(SWING) = 10;
-                
-                Kp(STAND) = 1200; 
-                Kd(STAND) = 10; 
-                
-                Kp(STAND(FOOT)) = 2000; 
-                Kd(STAND(FOOT)) = 10;
-
-            case FPEState.LeftSwing
-%                                     /  ___|| |  | ||_   _|| \ | ||  __ \
-%                                     \ `--. | |  | |  | |  |  \| || |  \/
-%                                      `--. \| |/\| |  | |  | . ` || | __ 
-%                                     /\__/ /\  /\  / _| |_ | |\  || |_\ \
-%                                     \____/  \/  \/  \___/ \_| \_/ \____/
-                Kp(SWING) = 500; 
-                Kd(SWING) = 10;
-                
-                Kp(STAND) = 1200; 
-                Kd(STAND) = 10; 
-                
-                Kp(STAND(FOOT)) = 2000; 
-                Kd(STAND(FOOT)) = 10;
-                
-            case FPEState.LeftDrop
-                
-%                                             |  _  \| ___ \|  _  || ___ \
-%                                             | | | || |_/ /| | | || |_/ /
-%                                             | | | ||    / | | | ||  __/ 
-%                                             | |/ / | |\ \ \ \_/ /| |    
-%                                             |___/  \_| \_| \___/ \_|    
-%                                                                         
-%     
-                Kp(ALL) = KP;
-                Kd(ALL) = KD;
-                
-                if ~IMPACTDETECTED
-                    Kp(SWING) = 500;
-                    Kd(SWING) = 10; 
-
-                    Kp(STAND) = 500 ;
-                    Kd(STAND) = 10; 
-
-                    Kp(STAND(FOOT)) = 0; 
-                    Kd(STAND(FOOT)) = 0;
-                    Kp(SWING(FOOT)) = 0;
-                    Kd(SWING(FOOT)) = 0;
-                    
-                    if ~IMPACT
-                        %% PRE IMPACT  ------------------------------------
-                        
-                        if (SWINGFOOT(end) <= 0.03)
-                            
-                            Kp(SWING(FOOT)) = 0;
-                            Kd(SWING(FOOT)) = 0;
-                            Kp(STAND(FOOT)) = 800; 
-                            Kd(STAND(FOOT)) = 10;
-                        end
-                        
-                    else
-                        %% DETECT IMPACT  ---------------------------------
-                        IMPACTDETECTED = 1;
-                        IMPACTCLOCK = 0;
-%                             Kp(ALL) = KP;
-%                             Kd(ALL) = KD;
-                        %{
-                        if IMPACTINTERVAL == 0
-                            Kp(ALL) = 3000;
-                            Kd(ALL) = 10;
-                            IMPACT = false;
-                        end
-                        %}
-                        
-                    end
-                else
-                    if IMPACT
-                        %% DURING IMPACT  -------------------------------------
-                        IMPACTCLOCK = min(IMPACTCLOCK+1, IMPACTINTERVAL); 
-                        
-                        if (IMPACTCLOCK < IMPACTINTERVAL)
-                            
-                            % Control action to absorb large forces and hold
-                            % current joint angles for a predefined period of
-                            % time.
-                            
-                            Kp(SWING) = KP;
-                            Kd(SWING) = KD;
-                            
-                            Kp(STAND) = KP;
-                            Kd(STAND) = KD;
-                            
-                            DEBUGSTEP = min(DEBUGSTEP+1, BREAKPOINT);
-                            
-                            if (DEBUGSTEP == BREAKPOINT)
-                                DEBUGSTEP = 0;
-                            end
-                            
-                        else
-                            
-                            %% POST IMPACT  -------------------------------
-                            Kp(ALL) = KP;
-                            Kd(ALL) = KD;
-                            
-                            IMPACT = false;
-                        end
-                        
-                        
-                    end
-                    Kp %@HACK
-                end
-            otherwise
-                error('Unsupported STATE for Joint Controller');
-        end
-    end
-       
-    
-    if ((LAST.STATE ~= STATE) && (IMPACTDETECTED))
-        if ((LAST.STATE == FPEState.LeftDrop) || (LAST.STATE == FPEState.RightDrop))
-            IMPACTDETECTED = 0; 
-        end
+    if ((STATE == FPEState.LeftPush) || (STATE == FPEState.LeftLift) ||  (STATE == FPEState.LeftSwing) || (STATE == FPEState.LeftDrop))
+        SWING = QL; STAND = QR;
+    else
+        SWING = QR; STAND = QL;
     end
     
-    % -------------------------------------------------------------
+    switch(STATE)
+        
+        case {FPEState.LeftLift, FPEState.LeftSwing, ...
+                FPEState.RightLift, FPEState.RightSwing}
+            Kp(SWING) = 500;
+            Kd(SWING) = 10;
+            
+        case {FPEState.LeftDrop, FPEState.RightDrop}
+            
+            if (LAST.STATE ~= STATE)
+                TIMER = 0; 
+                KPT = SmoothTrajectory(...
+                    [500 500 500 500 500 500 500], ...
+                    [KP KP KP KP KP 500 500], ...
+                    MAXT);
+                KDT = SmoothTrajectory(...
+                    [10 10 10 10 10 10 10], ...
+                    [KD KD KD KD KD KD KD], ...
+                    MAXT);
+            end
+            
+            TIMER = min(TIMER+1, MAXT); 
+            
+            Kp(SWING) = KPT(TIMER, :); 
+            Kd(SWING) = KDT(TIMER, :); 
+    end
     
     U = (Kp.*QE) + (Kd.*DQE);
     K = [Kp'; Kd']; 
     
 	LAST.STATE = STATE; 
-    LAST.IMPACT = IMPACT; 
     
+end
+
+
+function [qt] = SmoothTrajectory(q0, q1, tv)
+    tv = min(tv, 100000); 
+    tscal = 1;
+    t = (0:(tv-1))'/(tv-1);
+    q0 = q0(:);
+    q1 = q1(:);
+    qd0 = zeros(size(q0));
+    qd1 = qd0;
+
+    A = 6*(q1 - q0) - 3*(qd1+qd0)*tscal;
+    B = -15*(q1 - q0) + (8*qd0 + 7*qd1)*tscal;
+    C = 10*(q1 - q0) - (6*qd0 + 4*qd1)*tscal;
+    E = qd0*tscal;
+    F = q0;
+
+    tt = [t.^5 t.^4 t.^3 t.^2 t ones(size(t))];
+    c = [A B C zeros(size(A)) E F]';
     
-    
+    qt = tt*c;
 end

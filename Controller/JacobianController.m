@@ -18,7 +18,7 @@ function DQ = JacobianController(BIPED, STATE, DX)
     end
     
     if isempty(BREAKPOINT)
-        BREAKPOINT = 30; 
+        BREAKPOINT = 50; 
     end
     
     
@@ -39,24 +39,27 @@ function DQ = JacobianController(BIPED, STATE, DX)
     
     switch(SWING)
         case 1
-            [ DXcom_xy, DXcom_z, ~, DXswing, ~] = ParseDX(BIPED, DX);
+            [ DXcom_xy, ~, ~, DXswing, DXstand] = ParseDX(BIPED, DX);
         case 2
-            [ DXcom_xy, DXcom_z, ~, ~, DXswing] = ParseDX(BIPED, DX);
+            [ DXcom_xy, ~, ~, DXstand, DXswing] = ParseDX(BIPED, DX);
         otherwise
             error('Unable to parse DX'); 
     end
     
-    [ Jcom_xy, Jcom_z ] = SplitJcom(Jcom(BIPED)); 
+    [ Jcom_xy, ~ ] = SplitJcom(Jcom(BIPED)); 
     Jswing = Jleg(SWING, BIPED);
     
-    
     %% STATE SPECIFIC CONTROL ACTION: 
-    
     switch(STATE)
+        
+        case {FPEState.LeftPush, FPEState.RightPush}
 
+            [Jh, DXh] = Jdouble(BIPED, Jcom_xy, DXcom_xy); 
+            DQ(:,:) = S * Inverse(Jh) * DXh; 
+            
          case {FPEState.LeftLift, FPEState.RightLift}
             
-             
+            
             DXswing(3) = 4*DXswing(3);
             %DXswing(4:6) = 1*DXswing(4:6);
             
@@ -65,8 +68,8 @@ function DQ = JacobianController(BIPED, STATE, DX)
             DXhigh  = DXcom_xy;  
             [Jh, DXh] = Jconstraint(STAND, BIPED, Jhigh, DXhigh); 
             
-            Jhdebug = Inverse(Jh);
-            Jhdebug(6,:) .* DXh'
+            %Jhdebug = Inverse(Jh);
+            %Jhdebug(6,:) .* DXh'
             
             %% Low Priority Tasks
             Jl  = Jswing; 
@@ -76,12 +79,8 @@ function DQ = JacobianController(BIPED, STATE, DX)
             
             % DEBUG
             
-            Jldebug = Inverse(Jl);
-            Jldebug(6,:) .* DXl'
-            
-            if (DEBUGSTEP == BREAKPOINT)
-                DEBUGSTEP = 0;
-            end
+            %Jldebug = Inverse(Jl);
+            %Jldebug(6,:) .* DXl'
 
          case {FPEState.LeftSwing, FPEState.RightSwing}
             
@@ -96,40 +95,41 @@ function DQ = JacobianController(BIPED, STATE, DX)
             DXl = DXswing; 
             
             DQ(:,:) = S * Prioritized(Jh, DXh, Jl, DXl); 
-            
-            
-        case {FPEState.LeftPush, FPEState.RightPush}
-
-            [Jh, DXh] = Jdouble(BIPED, Jcom_xy, DXcom_xy); 
-            DQ(:,:) = S * Inverse(Jh) * DXh; 
+            %DQ(5:7) = zeros(3,1); 
+           
             
         case {FPEState.LeftDrop, FPEState.RightDrop}
             
-            Jhigh   = [Jcom_xy; Jswing];
-            DXhigh  = [DXcom_xy; DXswing];
-            [Jh, DXh] = Jconstraint(STAND, BIPED, Jhigh, DXhigh); 
+            Jstand = Jleg(STAND, BIPED); 
+            Jh = [Jswing; Jstand]; 
+            DXh = [DXswing; DXstand]; 
             
             DQ(:,:) = S * Inverse(Jh) * DXh; 
             
-        otherwise
-           
-            Kcom = 1;
-            if STATE == FPEState.LeftPush
-                Kcom = 6; 
+            
+            if (DEBUGSTEP == BREAKPOINT)
+                DEBUGSTEP = 0;
             end
-
-            DXcom_xy(1) = Kcom*DXcom_xy(1);
-
-            %% High Priority Tasks
-            Jhigh   = [Jcom_xy; Jswing];
-            DXhigh  = [DXcom_xy; DXswing];
-            [Jh, DXh] = Jconstraint(STAND, BIPED, Jhigh, DXhigh); 
             
-            %% Low Priority Tasks
-            Jl  = Jcom_z; 
-            DXl = DXcom_z; 
-            
-            DQ(:,:) = S * Prioritized(Jh, DXh, Jl, DXl); 
+        otherwise
+           error('Unsupported state for Jacobian Controller'); 
+%             Kcom = 1;
+%             if STATE == FPEState.LeftPush
+%                 Kcom = 6; 
+%             end
+% 
+%             DXcom_xy(1) = Kcom*DXcom_xy(1);
+% 
+%             %% High Priority Tasks
+%             Jhigh   = [Jcom_xy; Jswing];
+%             DXhigh  = [DXcom_xy; DXswing];
+%             [Jh, DXh] = Jconstraint(STAND, BIPED, Jhigh, DXhigh); 
+%             
+%             %% Low Priority Tasks
+%             Jl  = Jcom_z; 
+%             DXl = DXcom_z; 
+%             
+%             DQ(:,:) = S * Prioritized(Jh, DXh, Jl, DXl); 
     end
     
     LAST.STATE = STATE; 
@@ -206,7 +206,9 @@ function [ Jc, DXc ] = Jconstraint(SIDE, BIPED, J, DX)
         case 2 % Right Foot Single Support 
             Js = Jleg(SIDE, BIPED); 
             if ~InContact(BIPED.L.FOOT)
-                DXs = [BIPED.R.FOOT.V; BIPED.R.FOOT.W]; 
+                DW = BIPED.R.FOOT.W; % - ...
+                    %FixOrientation(BIPED.R.FOOT.O, BIPED.R.FOOT.W)
+                DXs = [BIPED.R.FOOT.V; DW]; 
             end
             
          otherwise
@@ -235,7 +237,7 @@ function [ Jc, DXc ] = Jdouble(BIPED, J, DX)
 
     Js = [Js1(1:6,:); Js2(1:6,:)];
     DXs = zeros(size(Js,1),1);
-
+    
     if (rank(Js(:,15:20)) ~= 6)
         error('Constraint Jacobian Lost Rank'); 
     end
@@ -413,7 +415,11 @@ function [ Ainv ] = Inverse( A )
     
     [m, n] = size(A);
     Ainv = zeros(n,m); 
-    
+
+%     if (cond(A) > 100)
+%         A
+%     end
+%     
     persistent k; 
     if isempty(k) k = 1e-3; end
     

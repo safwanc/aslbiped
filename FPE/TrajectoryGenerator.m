@@ -8,66 +8,108 @@ function [ XCOM, XLP, XRP ] = ...
     if isempty(LAST)
         LAST = struct( ...
             'STATE', STATE, ...
-            'XCOM', [0.0329 -0.0198 0.402]', ...
-            'XLP', [-0.0273 -0.1292 -0.001627]', ...
-            'XRP', [-0.02575 0.13 -0.002]' ...
+            'TIMER', 0, ...
+            'XCOM', COM, ...
+            'XLP', LP, ...
+            'XRP', RP ...
             ); 
     end
     
+    persistent UPDATE
+    if isempty(UPDATE)
+        UPDATE = 0; 
+    end
+    
+    persistent HOLD
+    if isempty(HOLD)
+        HOLD = struct( ...
+            'STAND', zeros(3,1), ...
+            'SWING', zeros(3,1), ...
+            'COM', zeros(3,1)    ...
+        ); 
+    end
+    
     if (STATE ~= LAST.STATE)
-        %
         
-        % [ SWING, STAND ] = ParseState(STATE, LP, RP);
-        SWING = LP; STAND = RP; 
-        
+        if ((STATE == FPEState.LeftPush) || (STATE == FPEState.LeftLift) ||  (STATE == FPEState.LeftSwing) || (STATE == FPEState.LeftDrop))
+            SWING = LP; STAND = RP; 
+        else
+            SWING = RP; STAND = LP; 
+        end
+                
         switch(STATE)
+            case {FPEState.StandStill}
+                XCOM = COM; 
+            
             case {FPEState.LeftPush, FPEState.RightPush}
+                HOLD.COM = COM; 
                 
                 XCOM = [STAND(1) STAND(2) COMH]'; 
-                SWING(3) = GNDH; 
-                STAND(3) = GNDH; 
+                SWING(3) = 0; 
+                STAND(3) = GNDH*2; 
+                
+                HOLD.STAND = STAND; 
+                HOLD.SWING = SWING; 
+                               
                 
             case {FPEState.LeftLift, FPEState.RightLift}
                 
-                XCOM = LAST.XCOM; 
+                SWING = HOLD.SWING; 
+                STAND = HOLD.STAND; 
+                XCOM = LAST.XCOM;
+                
                 SWING(3) = GNDCLR;
+                HOLD.SWING = SWING; 
                 
             case {FPEState.LeftSwing, FPEState.RightSwing}
                 
+                SWING = HOLD.SWING; 
+                STAND = HOLD.STAND; 
                 XCOM = LAST.XCOM; 
-                XCOM(1) = XCOM(1) + STEPL/2; 
+                XCOM(1) = XCOM(1) + 2*0.085;
+                XCOM(2) = XCOM(2) - 0.035;
                 
-                SWING(1) = SWING(1) + STEPL; 
-                SWING(3) = GNDCLR; 
+                SWING(1) = SWING(1) + 2*STEPL; 
+                HOLD.SWING = SWING; 
                 
-                if (STAND(2) > SWING(2)) % RIGHT FOOT STANCE
-                    SWING(2) = STAND(2) - STEPW; 
-                else
-                    SWING(2) = STAND(2) + STEPW; 
-                end
+            case {FPEState.LeftDrop, FPEState.RightDrop}
+                SWING = HOLD.SWING;
+                STAND = HOLD.STAND; 
+                XCOM = LAST.XCOM;
+                XCOM(1) = XCOM(1) + 0.085;
+                
+                SWING(3) = 0; 
+                
+                HOLD.SWING = SWING; 
+                
+                % LAST.TIMER = 0; 
                 
             otherwise
                 error('Unsupported State'); 
         end
         
-        XLP = SWING; XRP = STAND; 
-        % [ XLP, XRP ] = SetState(STATE, SWING, STAND);
+        if ((STATE == FPEState.LeftPush) || (STATE == FPEState.LeftLift) ||  (STATE == FPEState.LeftSwing) || (STATE == FPEState.LeftDrop))
+            XLP = SWING; XRP = STAND; 
+        else
+            XLP = STAND; XRP = SWING;
+        end
         
         LAST.XCOM = XCOM; 
         LAST.XLP = XLP; 
         LAST.XRP = XRP; 
-        
+        % LAST.TIMER = 0; 
     else
-        
-        % @TODO: Check if in DROP state (to keep updating swing foot traj
-        %           in order to track FPE.
         
         XCOM = LAST.XCOM; 
         XLP = LAST.XLP; 
         XRP = LAST.XRP; 
+        
     end
 
     LAST.STATE = STATE;
+    %LAST.TIMER = LAST.TIMER + 1; 
+    
+    %TIMER = LAST.TIMER; 
 
 end
 

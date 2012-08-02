@@ -1,4 +1,4 @@
-function QREF = IKController(BIPED, STATE, XREF, X)
+function QREF = IKController(BIPED, STATE, XREF, X, PHI)
 %#codegen
 
     global IMPACT
@@ -107,25 +107,18 @@ function QREF = IKController(BIPED, STATE, XREF, X)
             
             %% PRE IMPACT  -----------------------------------------------
             QREF = LAST.QREF;
+            TW3 = TW0*SWINGLEG.T0N(:,:,3);
+%             FPEHIP = Transform(inv(TW3), [FPEX; 0; 0]); 
+%             ZFOOT = FPEHIP/tan(PHI); 
             
-            % Orientation Compensation
-            % .. Keeps swing foot sagittal plane aligned with stance foot 
-            % .. while FPE is being tracked.
-            [TORSOROLL, TORSOPITCH, TORSOYAW] = TorsoOrientation(STANDLEG);
-
-            % SWING LEG  
-            QREF(1) = -TORSOYAW; 
-            QREF(2) = -TORSOROLL;
-            QREF(7) =  TORSOROLL;
+            TMP = Transform(inv(TW3), XREF); 
+            FPEHIP = TMP(1); 
+            ZFOOT = TMP(3); 
             
-            % FPE Tracking Kinematics (Sagittal Plane)
-            [QREF(3), QREF(4)] = SagittalIK(STANDLEG, SWINGLEG, ...
-                TW0, FPEX+FPEOFFSET, COM)
+            [LThigh, LShank, ~] = LegLengths(SWINGLEG)
+            [QREF(3), QREF(4)] = LegIK([FPEHIP; ZFOOT], LThigh, LShank);
+            TMP
             
-            QREF(6) = - QREF(3) - QREF(4) - TORSOPITCH;
-            
-            % Lock ANKLEYAW joint
-            QREF(5) = 0; 
         end
         
     else
@@ -134,12 +127,7 @@ function QREF = IKController(BIPED, STATE, XREF, X)
         IMPACTCLOCK = min(IMPACTCLOCK+1, UPDATEINTERVAL); 
         
         HOLD.Q = Q; 
-        % @EXPERIMENT: Fix Torso Orientation:
-        %HOLD.Q = FixOrientation(TO, Q);
-        % Hold joint values until contact forces stabilize. 
         QREF = HOLD.Q;
-        
-        
         
         % @EXPERIMENT: Update at regular intervals? 
         if (IMPACTCLOCK == UPDATEINTERVAL) 
@@ -183,13 +171,6 @@ function [ QREF ] = FixOrientation(TO, Q)
     QREF(9) = QREF(9) + R; 
     QREF(14) = QREF(9) - R; 
     
-%     QREF(2) = QREF(2) + R; 
-%     QREF(7) = QREF(7) - R; 
-%     
-%     QREF(9) = QREF(9) - R; 
-%     QREF(14) = QREF(14) + R; 
-    
-
 end
 
 function [QHIP, QKNEE] = SagittalIK(STANDLEG, SWINGLEG, TW0, FPEW, COMW)
