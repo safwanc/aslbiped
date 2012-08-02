@@ -1,4 +1,4 @@
-function [Jeff, Beff] = DrivetrainDynamics(q, dq)
+function [Jeff, Beff] = DrivetrainDynamics(x, dx)
 %#codegen
 
     persistent LINK DOF MOTOR
@@ -15,9 +15,14 @@ function [Jeff, Beff] = DrivetrainDynamics(q, dq)
         DOF = length(LINK) - 1; 
     end
     
-    LINK(1).p = zeros(3,1); %T01(1:3,4); 
-    LINK(1).R = eye(3);     %T01(1:3,1:3);
+    q = x(7:13); 
+    dq = dx(7:13); 
     
+    LINK(1).p = x(1:3); %T01(1:3,4); 
+    LINK(1).R = GetRotMatrix(x(4:6));     %T01(1:3,1:3);
+    LINK(1).vo = dx(1:3);
+    LINK(1).w  = dx(4:6);
+
     for n = 1: DOF
         LINK(n+1).q = q(n); 
         LINK(n+1).dq = dq(n); 
@@ -31,8 +36,8 @@ function [Jeff, Beff] = DrivetrainDynamics(q, dq)
     
     Aii = diag(MassMatrix(LINK));
     
-    Jeff = Aii + MOTOR.J; 
-    Beff = MOTOR.B; 
+    Jeff = Aii + MOTOR.J;
+    Beff = MOTOR.B;
 end
 
 function A = MassMatrix(LINK)
@@ -132,6 +137,56 @@ function R = Rodriguez(w,dt)
 
 end
 
+function [ R ] = GetRotMatrix(RPY)
+
+    RRoll   = Rx(RPY(1)); 
+    RPitch  = Ry(RPY(2)); 
+    RYaw    = Rz(RPY(3)); 
+    
+    R = RYaw * RPitch * RRoll;
+
+end
+
+
+function [ R ] = Rx(q)
+    
+    cq = cos(q); 
+    sq = sin(q); 
+
+    R = [
+        1   0    0
+        0   cq  -sq
+        0   sq   cq
+        ];
+
+end
+
+function [ R ] = Ry(q)
+    
+    cq = cos(q); 
+    sq = sin(q); 
+
+    R = [
+        cq  0   sq
+        0   1   0
+       -sq  0   cq
+       ];
+
+end
+
+function [ R ] = Rz(q)
+    
+    cq = cos(q); 
+    sq = sin(q); 
+
+    R = [
+        cq  -sq  0
+        sq   cq  0
+        0    0   1
+        ];
+
+end
+
 function c_hat = SkewSymmetric(c)
     c_hat = [0 -c(3) c(2);c(3) 0 -c(1);-c(2) c(1) 0];
 end
@@ -161,7 +216,7 @@ function [LINK] = ASLBiped
 	LINK(8).a	= [1 0 0]';
 	
 	LINK(1).b 	= [0 0 0]'; 
-	LINK(2).b 	= [0 0.13 -0.011525]'; 
+	LINK(2).b 	= [0 -0.13 -0.011525]'; 
 	LINK(3).b 	= [-0.00067 0 -0.0432375]'; 
 	LINK(4).b 	= [0 0 0]'; 
 	LINK(5).b 	= [0 0 -0.2837625]'; 
