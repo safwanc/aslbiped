@@ -2,28 +2,16 @@ function DQ = JacobianController(BIPED, STATE, DX)
 %#codegen
 
     DQ = zeros(14,1); 
-
-    % Controller State Variables
-    persistent LAST
+    
+    persistent LAST L R LR S JB I DEBUGSTEP BREAKPOINT
+    
+    % -------------------------------------------------------------
     if isempty(LAST)
         LAST = struct( ...
             'STATE', STATE ...
             ); 
     end
 
-    
-    persistent DEBUGSTEP BREAKPOINT
-    if isempty(DEBUGSTEP)
-        DEBUGSTEP = 0;
-    end
-    
-    if isempty(BREAKPOINT)
-        BREAKPOINT = 50; 
-    end
-    
-    
-    % Constant Variables (Optimization)
-    persistent L R LR S JB I
     if isempty(L)   L = 1; end
     if isempty(R)   R = 2; end
     if isempty(LR) LR = 0; end
@@ -31,10 +19,16 @@ function DQ = JacobianController(BIPED, STATE, DX)
     if isempty(S)   S = [eye(14) zeros(14, 6)]; end
     if isempty(JB) JB = [zeros(6,14) eye(6)];   end
     
+	if isempty(DEBUGSTEP)   DEBUGSTEP = 0;      end
+    if isempty(BREAKPOINT)  BREAKPOINT = 50;    end
+    
     DEBUGSTEP = min(DEBUGSTEP+1, BREAKPOINT);
     
-    %% COMMON CALCULATIONS (STATE INDEPENDENT): 
+	% -------------------------------------------------------------
+    % MAIN FUNCTION
+    % -------------------------------------------------------------
     
+    % COMMON CALCULATIONS (STATE INDEPENDENT) 
     [ SWING, STAND ] = ParseState(STATE);
     
     switch(SWING)
@@ -49,56 +43,58 @@ function DQ = JacobianController(BIPED, STATE, DX)
     [ Jcom_xy, ~ ] = SplitJcom(Jcom(BIPED)); 
     Jswing = Jleg(SWING, BIPED);
     
-    %% STATE SPECIFIC CONTROL ACTION: 
+    % STATE SPECIFIC CONTROL ACTION: 
     switch(STATE)
         
         case {FPEState.LeftPush, FPEState.RightPush}
+            
+            % @TUNING ------------------------------------
+            DXcom_xy = 2 * DXcom_xy; 
+            % --------------------------------------------
 
-            [Jh, DXh] = Jdouble(BIPED, Jcom_xy, DXcom_xy); 
+            [Jh, DXh] = DoubleSupport(BIPED, Jcom_xy, DXcom_xy); 
             DQ(:,:) = S * Inverse(Jh) * DXh; 
             
          case {FPEState.LeftLift, FPEState.RightLift}
             
-            
-            DXswing(3) = 4*DXswing(3);
-            %DXswing(4:6) = 1*DXswing(4:6);
+            % @TUNING ------------------------------------
+            DXswing(3) = 4 * DXswing(3);
+            % --------------------------------------------
             
             %% High Priority Tasks
             Jhigh   = Jcom_xy;
             DXhigh  = DXcom_xy;  
-            [Jh, DXh] = Jconstraint(STAND, BIPED, Jhigh, DXhigh); 
-            
-            %Jhdebug = Inverse(Jh);
-            %Jhdebug(6,:) .* DXh'
+            [Jh, DXh] = SingleSupport(STAND, BIPED, Jhigh, DXhigh); 
             
             %% Low Priority Tasks
             Jl  = Jswing; 
             DXl = DXswing; 
             
             DQ(:,:) = S * Prioritized(Jh, DXh, Jl, DXl); 
-            
-            % DEBUG
-            
-            %Jldebug = Inverse(Jl);
-            %Jldebug(6,:) .* DXl'
 
          case {FPEState.LeftSwing, FPEState.RightSwing}
             
+            % @TUNING ------------------------------------
+            DXswing(3) = 4 * DXswing(3);
+            % --------------------------------------------
             
             %% High Priority Tasks
             Jhigh   = Jcom_xy;
             DXhigh  = DXcom_xy;  
-            [Jh, DXh] = Jconstraint(STAND, BIPED, Jhigh, DXhigh); 
+            [Jh, DXh] = SingleSupport(STAND, BIPED, Jhigh, DXhigh); 
             
             %% Low Priority Tasks
             Jl  = Jswing; 
             DXl = DXswing; 
             
             DQ(:,:) = S * Prioritized(Jh, DXh, Jl, DXl); 
-            %DQ(5:7) = zeros(3,1); 
            
             
         case {FPEState.LeftDrop, FPEState.RightDrop}
+            
+            % @TUNING ------------------------------------
+            
+            % --------------------------------------------
             
             Jstand = Jleg(STAND, BIPED); 
             Jh = [Jswing; Jstand]; 
@@ -106,64 +102,25 @@ function DQ = JacobianController(BIPED, STATE, DX)
             
             DQ(:,:) = S * Inverse(Jh) * DXh; 
             
-            
             if (DEBUGSTEP == BREAKPOINT)
                 DEBUGSTEP = 0;
             end
             
         otherwise
            error('Unsupported state for Jacobian Controller'); 
-%             Kcom = 1;
-%             if STATE == FPEState.LeftPush
-%                 Kcom = 6; 
-%             end
-% 
-%             DXcom_xy(1) = Kcom*DXcom_xy(1);
-% 
-%             %% High Priority Tasks
-%             Jhigh   = [Jcom_xy; Jswing];
-%             DXhigh  = [DXcom_xy; DXswing];
-%             [Jh, DXh] = Jconstraint(STAND, BIPED, Jhigh, DXhigh); 
-%             
-%             %% Low Priority Tasks
-%             Jl  = Jcom_z; 
-%             DXl = DXcom_z; 
-%             
-%             DQ(:,:) = S * Prioritized(Jh, DXh, Jl, DXl); 
     end
     
     LAST.STATE = STATE; 
-end
-
-function [ DXcom_xy, DXcom_z, DXtorso_rpy, DXleft, DXright] = ParseDX(BIPED, DX)
-
-    DXcom_xy = DX(1:2); 
-    DXcom_z = DX(3); 
-    DXtorso_rpy = DX(4:6); 
-%     DXleft = DX(7:12); 
-%     DXright = DX(13:18); 
-	DXleft  = [DX(7:9);     FixOrientation(BIPED.L.FOOT.O, DX(10:12))];  
-    DXright = [DX(13:15);   FixOrientation(BIPED.R.FOOT.O, DX(16:18))];  
     
-
 end
 
-function [ W ] = FixOrientation(o, w)
-
-    psi = o(1); 
-    theta = o(2); 
-    phi = o(3); 
-
-    dpsi = w(1); 
-    dtheta = w(2); 
-    dphi = w(3); 
-
-    W = zeros(3,1); 
-    W(1) = (cos(phi) * cos(theta) * dpsi) - (sin(phi) * dtheta); 
-    W(2) = (cos(phi)*dtheta) + (cos(theta)*sin(phi)*dpsi); 
-    W(3) = dphi - (sin(theta)*dpsi); 
-
+function [ DQ ] = Prioritized(J1, X1, J2, X2)
+    DQ = Inverse(J1)*X1 + (Inverse(J2*Null(J1))*(X2-(J2*Inverse(J1)*X1))); 
 end
+
+% ------------------------------------------------------------------------
+% PARSERS
+% ------------------------------------------------------------------------
 
 function [ SWING, STAND ] = ParseState(STATE)
 
@@ -180,18 +137,21 @@ function [ SWING, STAND ] = ParseState(STATE)
 
 end
 
-function [ DQ ] = Prioritized(J1, X1, J2, X2)
+function [ DXcom_xy, DXcom_z, DXtorso_rpy, DXleft, DXright] = ParseDX(BIPED, DX)
 
-    DQ = Inverse(J1)*X1 + (Inverse(J2*Null(J1))*(X2-(J2*Inverse(J1)*X1))); 
-
+    DXcom_xy    = DX(1:2); 
+    DXcom_z     = DX(3); 
+    DXtorso_rpy = DX(4:6); 
+	DXleft      = [DX(7:9);     FixOrientation(BIPED.L.FOOT.O, DX(10:12))];  
+    DXright     = [DX(13:15);   FixOrientation(BIPED.R.FOOT.O, DX(16:18))];  
+    
 end
 
 % ------------------------------------------------------------------------
-% SINGLE SUPPORT CONSTRAINTS
+% SUPPORT CONSTRAINTS
 % ------------------------------------------------------------------------
 
-function [ Jc, DXc ] = Jconstraint(SIDE, BIPED, J, DX)
-    
+function [ Jc, DXc ] = SingleSupport(SIDE, BIPED, J, DX)
     
     DXs = zeros(6,1);
     
@@ -212,11 +172,7 @@ function [ Jc, DXc ] = Jconstraint(SIDE, BIPED, J, DX)
             end
             
          otherwise
-             Js1 = Jleg(1, BIPED); 
-             Js2 = Jleg(2, BIPED); 
-             
-             Js = [Js1(1:3,:); Js2(1:3,:)]; 
-             %DXs = zeros(size(Js,1),1);
+             error('Use DoubleSupport(..) constraint function instead..'); 
              
      end
 
@@ -230,7 +186,7 @@ function [ Jc, DXc ] = Jconstraint(SIDE, BIPED, J, DX)
 end
 
 
-function [ Jc, DXc ] = Jdouble(BIPED, J, DX)
+function [ Jc, DXc ] = DoubleSupport(BIPED, J, DX)
 
     Js1 = Jleg(1, BIPED);
     Js2 = Jleg(2, BIPED);
@@ -257,24 +213,24 @@ function [ c ] = InContact(FOOT)
 
 end
 
-function [ b ] = SingleSupportStable(COM, STANCELEG)
-
-    b = 1; 
-
-    XCP = STANCELEG.FOOT.CP(1,:); 
-    YCP = STANCELEG.FOOT.CP(2,:); 
-    
-    xmax = max(XCP); ymax = max(YCP); 
-    xmin = min(XCP); ymin = min(YCP); 
-    
-    if (...
-            (COM(1) > xmax) || (COM(1) < xmin) ...
-         || (COM(2) > ymax) || (COM(2) < ymin) ...
-        )
-        b = 0; 
-    end
-
-end
+% function [ b ] = SingleSupportStable(COM, STANCELEG)
+% 
+%     b = 1; 
+% 
+%     XCP = STANCELEG.FOOT.CP(1,:); 
+%     YCP = STANCELEG.FOOT.CP(2,:); 
+%     
+%     xmax = max(XCP); ymax = max(YCP); 
+%     xmin = min(XCP); ymin = min(YCP); 
+%     
+%     if (...
+%             (COM(1) > xmax) || (COM(1) < xmin) ...
+%          || (COM(2) > ymax) || (COM(2) < ymin) ...
+%         )
+%         b = 0; 
+%     end
+% 
+% end
 
 % ------------------------------------------------------------------------
 % COM JACOBIANS
@@ -437,6 +393,23 @@ function [ Ainv ] = Inverse( A )
             Ainv(:,:) = A'/(AAt + kI); 
         end
     end
+end
+
+function [ W ] = FixOrientation(o, w)
+
+    % psi = o(1); 
+    theta = o(2); 
+    phi = o(3); 
+
+    dpsi = w(1); 
+    dtheta = w(2); 
+    dphi = w(3); 
+
+    W = zeros(3,1); 
+    W(1) = (cos(phi) * cos(theta) * dpsi) - (sin(phi) * dtheta); 
+    W(2) = (cos(phi)*dtheta) + (cos(theta)*sin(phi)*dpsi); 
+    W(3) = dphi - (sin(theta)*dpsi); 
+
 end
 
 function [ S ] = Skew( a )
