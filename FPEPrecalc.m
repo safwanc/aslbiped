@@ -9,7 +9,7 @@ function [ Wavg, Icom ] = FPEPrecalc( WB, DQ, COM, T0X, CGX )
     
     for i = 1 : 15
         % rotate tensors to world frame
-        Iw(:,:,i) = Rw(:,:,i) * I(:,:,i); 
+        Iw(:,:,i) = Rw(:,:,i) * I(:,:,i) * Rw(:,:,i)'; 
     end
     
     Iyy = squeeze(Iw(2,2,:));
