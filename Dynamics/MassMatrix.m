@@ -1,14 +1,10 @@
-function [Jeff, Beff] = DrivetrainDynamics(x, dx, w)
+function [A, b] = MassMatrix(x, dx, w)
 %#codegen
 
-    persistent LINK DOF MOTOR
+    persistent LINK DOF
     
     if isempty(LINK)
         LINK = ASLBiped; 
-    end
-    
-    if isempty(MOTOR)
-        MOTOR = ASLMotors; 
     end
 
     if isempty(DOF)
@@ -34,20 +30,13 @@ function [Jeff, Beff] = DrivetrainDynamics(x, dx, w)
         LINK(j).R = LINK(MOM).R * Rodriguez(LINK(j).a, LINK(j).q);
     end
     
-    A = MassMatrix(LINK, w);
-    Aii = diag(A(7:end, 7:end));
+    [A, b] = NewtonEulerDynamics(LINK, w);
     
-    Jeff = Aii + MOTOR.J;
-    Beff = MOTOR.B;
-    
-%     ddx = A\(-b+[zeros(1,6) u']');
-%     ddq = ddx(7:end); 
-   
 end
 
 %% Kinematics + Dynamics
 
-function [A, b] = MassMatrix(LINK, CONTACT)
+function [A, b] = NewtonEulerDynamics(LINK, CONTACT)
 
 	DOF = length(LINK) - 1 + 6;
     
@@ -329,46 +318,5 @@ function [uLINK] = ASLBiped
     % Finalize
     uLINK(1).p = uLINK(1).b; 
     uLINK(1).R = eye(3); 
-    
-end
-
-
-function [MOTOR] = ASLMotors
-
-	% Motor Parameters
-    [~, Km1, Kb1, R1, ~, Jm1, gr1] = Micromo3257;
-    [~, Km2, Kb2, R2, ~, Jm2, gr2] = Micromo3242;
-    
-    J1 = Jm1 * (gr1^2);     B1 = (gr1^2) * (Kb1*Km1/R1); 
-    J2 = Jm2 * (gr2^2);     B2 = (gr2^2) * (Kb2*Km2/R2); 
-    
-    MOTOR = struct(...
-        'J', [J1 J1 J1 J1 J1 J1 J2 J1 J1 J1 J1 J1 J1 J2]', ...
-        'B', [B1 B1 B1 B1 B1 B1 B2 B1 B1 B1 B1 B1 B1 B2]'  ...
-        ); 
-
-end
-
-function [Kv, Km, Kb, R, L, Jm, gr] = Micromo3257
-
-    Kv = 52.3598775;  %   Speed Constant        [(rad/s)/V]
-    Km = 0.01910000;  %	  Torque Constant       [Nm/A]
-    Kb = 0.01909859;  %   Back EMF Constant     [V/(rad/s)]
-    R  = 0.41000000;  %   Armature Resistance   [Ohms]
-    L  = 0.00007000;  %   Armature Inductance   [H]
-    Jm = 0.00000420;  %   Motor Inertia         [kg m^2]
-    gr = 240.000000;  %   Gear Ratio            [:1]
-    
-end
-
-function [Kv, Km, Kb, R, L, Jm, gr] = Micromo3242
-
-    Kv = 48.5899663;  %   Speed Constant        [(rad/s)/V]
-    Km = 0.02060000;  %	  Torque Constant       [Nm/A]
-    Kb = 0.02058038;  %   Back EMF Constant     [V/(rad/s)]
-    R  = 1.27000000;  %   Armature Resistance   [Ohms]
-    L  = 0.00013500;  %   Armature Inductance   [H]
-    Jm = 0.00000250;  %   Motor Inertia         [kg m^2]
-    gr = 68.0000000;  %   Gear Ratio            [:1]
     
 end
